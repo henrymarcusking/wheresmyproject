@@ -1117,9 +1117,9 @@
         if (SpeechRecog) {
             document.getElementById('voice-add-btn').classList.remove('hidden');
             recognition = new SpeechRecog();
-            recognition.continuous     = true;   // keep listening through pauses
-            recognition.interimResults = true;   // show live feedback as words come in
-            recognition.lang           = 'en-US';
+            recognition.continuous      = false;  // one utterance at a time — avoids duplicate-word bugs
+            recognition.interimResults  = false;  // final results only, no partial-word noise
+            recognition.lang            = 'en-US';
             recognition.maxAlternatives = 1;
         }
 
@@ -1215,65 +1215,64 @@
             setVoiceBanner('heard', `Heard: "${transcript}"`);
         }
 
-        function stopListening() {
+        // Whether we should keep restarting after each utterance ends
+        let voiceShouldRestart = false;
+
+        function stopListening(processResult = true) {
+            voiceShouldRestart = false;
             clearTimeout(voiceSilenceTimer);
             clearTimeout(voiceMaxTimer);
             try { recognition?.stop(); } catch(e) {}
+            if (processResult && voiceFinalTranscript.trim()) {
+                fillFormFromVoice(voiceFinalTranscript.trim());
+            } else if (processResult && !voiceFinalTranscript.trim()) {
+                const icon = document.getElementById('voice-banner-icon');
+                if (icon?.classList.contains('animate-pulse')) {
+                    setVoiceBanner('error', 'Nothing heard — tap "Try again"');
+                }
+            }
+            voiceFinalTranscript = '';
         }
 
         function startListening() {
             if (!recognition) return;
-
-            voiceFinalTranscript = '';
+            voiceFinalTranscript  = '';
+            voiceShouldRestart    = true;
             clearTimeout(voiceSilenceTimer);
             clearTimeout(voiceMaxTimer);
             setVoiceBanner('listening');
 
+            // Wire up handlers fresh each time (safe to reassign)
             recognition.onresult = (e) => {
-                let interim = '';
-                for (let i = e.resultIndex; i < e.results.length; i++) {
-                    if (e.results[i].isFinal) {
-                        voiceFinalTranscript += e.results[i][0].transcript + ' ';
-                    } else {
-                        interim = e.results[i][0].transcript;
-                    }
-                }
-                // Show live feedback
-                const preview = (voiceFinalTranscript + interim).trim();
-                if (preview) setVoiceBanner('listening', `Hearing: "${preview}"`);
+                // With continuous:false each onresult has exactly one final result
+                const chunk = e.results[0][0].transcript.trim();
+                if (!chunk) return;
+                voiceFinalTranscript += (voiceFinalTranscript ? ' ' : '') + chunk;
+                setVoiceBanner('listening', `Hearing: "${voiceFinalTranscript}"`);
 
-                // Auto-stop 1.5 s after speech goes quiet
+                // Reset the silence timer — process 1.5 s after speech stops
                 clearTimeout(voiceSilenceTimer);
-                voiceSilenceTimer = setTimeout(() => stopListening(), 1500);
+                voiceSilenceTimer = setTimeout(() => stopListening(true), 1500);
             };
 
             recognition.onerror = (e) => {
+                if (e.error === 'aborted' || e.error === 'no-speech') return;
+                voiceShouldRestart = false;
                 clearTimeout(voiceSilenceTimer);
                 clearTimeout(voiceMaxTimer);
-                if (e.error === 'aborted') return;
-                setVoiceBanner('error', e.error === 'no-speech'
-                    ? 'Nothing heard — tap "Try again"'
-                    : 'Microphone error — tap "Try again"');
-            };
-
-            recognition.onend = () => {
-                clearTimeout(voiceSilenceTimer);
-                clearTimeout(voiceMaxTimer);
-                const result = voiceFinalTranscript.trim();
-                if (result) {
-                    fillFormFromVoice(result);
-                } else {
-                    // Only show error if we're still in listening state
-                    const icon = document.getElementById('voice-banner-icon');
-                    if (icon?.classList.contains('animate-pulse')) {
-                        setVoiceBanner('error', 'Nothing clear heard — tap "Try again"');
-                    }
-                }
+                setVoiceBanner('error', 'Microphone error — tap "Try again"');
                 voiceFinalTranscript = '';
             };
 
-            // Safety net: stop after 12 s max
-            voiceMaxTimer = setTimeout(() => stopListening(), 12000);
+            recognition.onend = () => {
+                // Restart immediately so pauses between phrases don't cut us off
+                if (voiceShouldRestart) {
+                    try { recognition.start(); } catch(e) {}
+                }
+            };
+
+            // Absolute max 12 s — stops and processes whatever we have
+            voiceMaxTimer = setTimeout(() => stopListening(true), 12000);
 
             try {
                 recognition.start();
