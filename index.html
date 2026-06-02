@@ -888,8 +888,8 @@
                 const ownerPalette = ownerPalettes[Math.max(ownerIdx, 0) % ownerPalettes.length];
                 const ownerInitial = item.owner ? item.owner.trim().charAt(0).toUpperCase() : '';
                 const ownerBadge = item.owner
-                    ? `<span class="w-7 h-7 rounded-lg text-xs font-bold border ${ownerPalette.bg} ${ownerPalette.text} ${ownerPalette.border} flex items-center justify-center" title="${item.owner}">
-                           ${ownerInitial}
+                    ? `<span class="px-2 py-1 rounded-lg text-xs font-bold border ${ownerPalette.bg} ${ownerPalette.text} ${ownerPalette.border} flex items-center gap-1" title="${item.owner}">
+                           <i data-lucide="user" class="w-3 h-3"></i>${ownerInitial}
                        </span>`
                     : '';
 
