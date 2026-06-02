@@ -370,11 +370,21 @@
 
         async function saveLocationOrder() {
             setSyncing(true);
-            await Promise.all(
+            const results = await Promise.all(
                 masterLocations.map((name, i) =>
-                    supabaseClient.from('locations').update({ sort_order: i + 1 }).eq('name', name)
+                    supabaseClient.from('locations').update({ sort_order: i + 1 }).eq('name', name).select()
                 )
             );
+            const failed = results.filter(r => r.error);
+            if (failed.length > 0) {
+                console.error('Location order save failed:', failed[0].error);
+                setSyncing(false);
+                // Re-fetch to restore the real DB state so the UI isn't misleading
+                await fetchLocations();
+                renderLocationsMenu();
+                setSyncIndicatorError('Could not save location order — check your connection and try again.');
+                return;
+            }
             setSyncing(false);
         }
 
@@ -556,9 +566,18 @@
 
         async function saveOwnerOrder() {
             setSyncing(true);
-            await Promise.all(masterOwners.map((name, i) =>
-                supabaseClient.from('owners').update({ sort_order: i + 1 }).eq('name', name)
+            const results = await Promise.all(masterOwners.map((name, i) =>
+                supabaseClient.from('owners').update({ sort_order: i + 1 }).eq('name', name).select()
             ));
+            const failed = results.filter(r => r.error);
+            if (failed.length > 0) {
+                console.error('Owner order save failed:', failed[0].error);
+                setSyncing(false);
+                await fetchOwners();
+                renderOwnersMenu();
+                setSyncIndicatorError('Could not save owner order — check your connection and try again.');
+                return;
+            }
             setSyncing(false);
         }
 
@@ -800,6 +819,12 @@
             } else {
                 syncIndicator.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span> Live Cloud`;
             }
+        }
+
+        function setSyncIndicatorError(message) {
+            syncIndicator.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-400"></span> ${message}`;
+            // Restore normal indicator after 5 seconds
+            setTimeout(() => setSyncing(false), 5000);
         }
 
         function renderItems(filterText = '') {
