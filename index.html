@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WheresMy Cloud</title>
     <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
     <meta name="theme-color" content="#4f46e5">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -19,7 +20,10 @@
     <header class="bg-indigo-600 text-white sticky top-0 shadow-md z-10">
         <div class="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
             <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">
-                <i data-lucide="cloud-lightning" class="w-5 h-5 text-amber-300"></i> WheresMy
+                <svg width="22" height="22" viewBox="0 0 512 512" class="shrink-0">
+                    <text x="256" y="356" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif" font-size="255" font-weight="900" fill="#fbbf24" text-anchor="middle">?</text>
+                    <path d="M 86,408 L 86,174 L 256,78 L 426,174 L 426,408 Z" fill="none" stroke="white" stroke-width="18" stroke-linejoin="round" stroke-linecap="round"/>
+                </svg> WheresMy
             </h1>
             <div class="flex items-center gap-2">
                 <button id="open-owners-btn" class="text-white hover:text-indigo-200 p-2.5 bg-indigo-700 rounded-xl transition-colors" title="Manage Owners">

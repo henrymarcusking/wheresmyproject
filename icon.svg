@@ -1,24 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- Smooth, Friendly Indigo Gradient Background -->
   <defs>
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#6366f1" />
-      <stop offset="100%" stop-color="#4f46e5" />
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
     </linearGradient>
   </defs>
-  
-  <!-- Base Rounded Container (App Icon Style) -->
-  <rect width="512" height="512" rx="110" fill="url(#bgGrad)" />
-  
-  <!-- "WM?" Friendly Typography -->
-  <text x="50%" y="54%" 
-        font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" 
-        font-size="160" 
-        font-weight="800" 
-        fill="#ffffff" 
-        text-anchor="middle" 
-        dominant-baseline="middle" 
-        letter-spacing="-4">
-    WM<tspan fill="#fbbf24">?</tspan>
-  </text>
+  <rect width="512" height="512" rx="110" fill="url(#bgGrad)"/>
+  <text x="256" y="356"
+        font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="255"
+        font-weight="900"
+        fill="#fbbf24"
+        text-anchor="middle">?</text>
+  <path d="M 86,408 L 86,174 L 256,78 L 426,174 L 426,408 Z"
+        fill="none"
+        stroke="white"
+        stroke-width="18"
+        stroke-linejoin="round"
+        stroke-linecap="round"/>
 </svg>
