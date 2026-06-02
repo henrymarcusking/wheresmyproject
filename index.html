@@ -110,9 +110,23 @@
                     <span class="text-red-500 text-lg">🔴</span>
                     <p class="text-sm font-semibold text-red-700">This item is marked as lost. Set a new location and save to mark it as found.</p>
                 </div>
+                <!-- Shown when item is on loan -->
+                <div id="loan-banner" class="hidden flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-lg px-3 py-2.5">
+                    <span class="text-teal-500 text-lg">↗</span>
+                    <p id="loan-banner-text" class="text-sm font-semibold text-teal-700"></p>
+                </div>
+                <!-- Loan borrower field — revealed when Loan Out is tapped -->
+                <div id="loan-field" class="hidden space-y-1">
+                    <label class="block text-sm font-semibold text-slate-700">Who's borrowing this?</label>
+                    <input type="text" id="form-loaned-to" placeholder="Name" autocomplete="off"
+                           class="w-full border border-teal-300 rounded-lg p-2.5 focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                </div>
                 <button id="form-submit-btn" type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl mt-2">Save to Cloud</button>
-                <!-- Shown when item is NOT lost -->
-                <button id="lost-btn" type="button" class="hidden w-full bg-white hover:bg-red-50 text-red-500 border border-red-300 font-semibold py-3 rounded-xl transition-colors">LOST!</button>
+                <!-- Shown when item is normal (not lost, not on loan) -->
+                <div id="action-btns" class="hidden grid grid-cols-2 gap-3">
+                    <button id="lost-btn" type="button" class="bg-white hover:bg-red-50 text-red-500 border border-red-300 font-semibold py-3 rounded-xl transition-colors">LOST!</button>
+                    <button id="loan-btn" type="button" class="bg-white hover:bg-teal-50 text-teal-600 border border-teal-300 font-semibold py-3 rounded-xl transition-colors">Loan out</button>
+                </div>
             </form>
         </div>
     </div>
@@ -190,7 +204,7 @@
         let items = [];
         let masterLocations = [];
         let masterOwners = [];
-        const activeFilters = { owners: new Set(), locations: new Set(), lostOnly: false };
+        const activeFilters = { owners: new Set(), locations: new Set(), lostOnly: false, loanedOnly: false };
 
         const colorPalettes = [
             { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
@@ -645,6 +659,7 @@
             locationMap[location] = sublocation;
 
             const owner = document.getElementById('form-owner').value || null;
+            const loanedToVal = document.getElementById('form-loaned-to').value.trim();
 
             const itemData = {
                 name: document.getElementById('form-name').value,
@@ -652,7 +667,8 @@
                 sublocation,
                 location_map: locationMap,
                 owner,
-                lost: false  // saving always marks the item as found/located
+                lost: false,
+                loaned_to: loanedToVal || null  // null clears the loan when returning
             };
 
             if (id) {
@@ -664,6 +680,14 @@
             itemForm.reset();
             itemModal.classList.add('hidden');
             await fetchItems();
+        });
+
+        document.getElementById('loan-btn').addEventListener('click', () => {
+            const loanField = document.getElementById('loan-field');
+            const submitBtn = document.getElementById('form-submit-btn');
+            loanField.classList.remove('hidden');
+            document.getElementById('form-loaned-to').focus();
+            submitBtn.textContent = 'Save & Loan Out';
         });
 
         document.getElementById('lost-btn').addEventListener('click', async () => {
@@ -689,7 +713,16 @@
             const homeHint    = document.getElementById('home-hint');
             const lostBtn     = document.getElementById('lost-btn');
             const lostBanner  = document.getElementById('lost-banner');
+            const loanBanner  = document.getElementById('loan-banner');
+            const loanBannerText = document.getElementById('loan-banner-text');
+            const loanField   = document.getElementById('loan-field');
+            const loanedToInput = document.getElementById('form-loaned-to');
+            const actionBtns  = document.getElementById('action-btns');
             const submitBtn   = document.getElementById('form-submit-btn');
+
+            // Reset loan field state
+            loanField.classList.add('hidden');
+            loanedToInput.value = '';
 
             if (id) {
                 const item = items.find(i => i.id == id);
@@ -720,14 +753,19 @@
                         ? `🏠 Remembered: ${known}`
                         : '💡 The room you enter will be remembered for each location.';
 
-                    // Show/hide lost UI
+                    // Show/hide lost/loan UI
+                    lostBanner.classList.add('hidden');
+                    loanBanner.classList.add('hidden');
+                    actionBtns.classList.add('hidden');
                     if (item.lost) {
                         lostBanner.classList.remove('hidden');
-                        lostBtn.classList.add('hidden');
                         submitBtn.textContent = 'Save & Mark as Found';
+                    } else if (item.loaned_to) {
+                        loanBannerText.textContent = `On loan to ${item.loaned_to}. Save a new location to mark it as returned.`;
+                        loanBanner.classList.remove('hidden');
+                        submitBtn.textContent = 'Save & Mark as Returned';
                     } else {
-                        lostBanner.classList.add('hidden');
-                        lostBtn.classList.remove('hidden');
+                        actionBtns.classList.remove('hidden');
                         submitBtn.textContent = 'Save to Cloud';
                     }
                 }
@@ -737,7 +775,8 @@
                 document.getElementById('form-item-id').value = '';
                 homeHint.textContent = '💡 The room you enter will be remembered for each location.';
                 lostBanner.classList.add('hidden');
-                lostBtn.classList.add('hidden');
+                loanBanner.classList.add('hidden');
+                actionBtns.classList.add('hidden');
                 submitBtn.textContent = 'Save to Cloud';
 
                 // Pre-set location from filter if exactly one is active; otherwise use first in list
@@ -773,8 +812,9 @@
                     (item.location || '').toLowerCase().includes(text);
                 const matchesOwner    = activeFilters.owners.size === 0    || activeFilters.owners.has(item.owner || '');
                 const matchesLocation = activeFilters.locations.size === 0 || activeFilters.locations.has(item.location);
-                const matchesLost     = !activeFilters.lostOnly || item.lost === true;
-                return matchesSearch && matchesOwner && matchesLocation && matchesLost;
+                const matchesLost     = !activeFilters.lostOnly   || item.lost === true;
+                const matchesLoaned   = !activeFilters.loanedOnly || !!item.loaned_to;
+                return matchesSearch && matchesOwner && matchesLocation && matchesLost && matchesLoaned;
             });
 
             if (filteredItems.length === 0) {
@@ -809,9 +849,11 @@
 
                 const locationBadge = item.lost
                     ? `<span onclick="openItemModal(${item.id})" class="px-3 py-1.5 rounded-lg text-xs font-bold border bg-red-500 text-white border-red-500 cursor-pointer select-none active:scale-95 transition-transform">LOST!</span>`
+                    : item.loaned_to
+                    ? `<span onclick="openItemModal(${item.id})" class="px-3 py-1.5 rounded-lg text-xs font-bold border bg-teal-50 text-teal-700 border-teal-200 cursor-pointer select-none active:scale-95 transition-transform" title="On loan — tap for details">↗ ${item.loaned_to}</span>`
                     : `<span onclick="cycleLocation(${item.id}, '${item.location}', event)" class="px-3 py-1.5 rounded-lg text-xs font-bold border ${palette.bg} ${palette.text} ${palette.border} transition-transform active:scale-95 cursor-pointer select-none" title="Tap to cycle location">${item.location}</span>`;
 
-                const sublocationLine = item.lost
+                const sublocationLine = (item.lost || item.loaned_to)
                     ? ''
                     : `<p class="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><i data-lucide="layers" class="w-3 h-3"></i> ${item.sublocation}</p>`;
 
@@ -894,11 +936,13 @@
                 locSection.classList.add('hidden');
             }
 
-            // Status section — Lost only toggle (always shown, at the bottom)
+            // Status section — Lost and On loan toggles
             const statusPillsEl = document.getElementById('filter-status-pills');
             statusPillsEl.innerHTML = '';
+            statusPillsEl.className = 'flex flex-wrap gap-2';
+
             const lostPill = document.createElement('button');
-            lostPill.textContent = '🔴 Lost items only';
+            lostPill.textContent = '🔴 Lost';
             lostPill.className = `px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
                 activeFilters.lostOnly
                     ? 'bg-red-500 text-white border-red-500'
@@ -906,15 +950,26 @@
             }`;
             lostPill.addEventListener('click', () => {
                 activeFilters.lostOnly = !activeFilters.lostOnly;
-                renderFilterSheet();
-                updateFilterUI();
-                renderItems(searchBar.value);
+                renderFilterSheet(); updateFilterUI(); renderItems(searchBar.value);
             });
             statusPillsEl.appendChild(lostPill);
+
+            const loanPill = document.createElement('button');
+            loanPill.textContent = '↗ On loan';
+            loanPill.className = `px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                activeFilters.loanedOnly
+                    ? 'bg-teal-600 text-white border-teal-600'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-teal-400'
+            }`;
+            loanPill.addEventListener('click', () => {
+                activeFilters.loanedOnly = !activeFilters.loanedOnly;
+                renderFilterSheet(); updateFilterUI(); renderItems(searchBar.value);
+            });
+            statusPillsEl.appendChild(loanPill);
         }
 
         function updateFilterUI() {
-            const totalActive = activeFilters.owners.size + activeFilters.locations.size + (activeFilters.lostOnly ? 1 : 0);
+            const totalActive = activeFilters.owners.size + activeFilters.locations.size + (activeFilters.lostOnly ? 1 : 0) + (activeFilters.loanedOnly ? 1 : 0);
             const filterLabel = document.getElementById('filter-label');
             const openBtn = document.getElementById('open-filter-btn');
             const chipsEl = document.getElementById('active-filter-chips');
@@ -933,6 +988,12 @@
                 if (activeFilters.lostOnly) {
                     chipsEl.appendChild(makeChip('🔴 Lost only', () => {
                         activeFilters.lostOnly = false;
+                        updateFilterUI(); renderFilterSheet(); renderItems(searchBar.value);
+                    }));
+                }
+                if (activeFilters.loanedOnly) {
+                    chipsEl.appendChild(makeChip('↗ On loan', () => {
+                        activeFilters.loanedOnly = false;
                         updateFilterUI(); renderFilterSheet(); renderItems(searchBar.value);
                     }));
                 }
@@ -973,6 +1034,7 @@
             activeFilters.owners.clear();
             activeFilters.locations.clear();
             activeFilters.lostOnly = false;
+            activeFilters.loanedOnly = false;
             renderFilterSheet();
             updateFilterUI();
             renderItems(searchBar.value);
