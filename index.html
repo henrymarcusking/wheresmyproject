@@ -22,6 +22,9 @@
                 <i data-lucide="cloud-lightning" class="w-5 h-5 text-amber-300"></i> WheresMy
             </h1>
             <div class="flex items-center gap-2">
+                <button id="open-owners-btn" class="text-white hover:text-indigo-200 p-1 bg-indigo-700 rounded-lg transition-colors" title="Manage Owners">
+                    <i data-lucide="users" class="w-4 h-4"></i>
+                </button>
                 <button id="open-locations-btn" class="text-white hover:text-indigo-200 p-1 bg-indigo-700 rounded-lg transition-colors" title="Manage Locations">
                     <i data-lucide="map-pin" class="w-4 h-4"></i>
                 </button>
@@ -33,7 +36,7 @@
     </header>
 
     <main class="max-w-md mx-auto px-4 mt-6">
-        <div class="text-xs text-slate-400 mb-2 px-1">💡 Tap item to edit • Tap location badge to cycle • Tap 📍 icon above to manage places</div>
+        <div class="text-xs text-slate-400 mb-2 px-1">💡 Tap item to edit • Tap location badge to cycle • Tap 📍 or 👥 above to manage places/owners</div>
         <div class="relative mb-6">
             <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
                 <i data-lucide="search" class="w-5 h-5"></i>
@@ -80,6 +83,12 @@
                     <input type="text" id="form-sublocation" list="sublocation-suggestions" autocomplete="off" class="w-full border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
                     <datalist id="sublocation-suggestions"></datalist>
                 </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Owner <span class="font-normal text-slate-400">(optional)</span></label>
+                    <select id="form-owner" class="w-full border border-slate-200 bg-white rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="">— No owner —</option>
+                    </select>
+                </div>
                 <p id="home-hint" class="text-xs text-slate-400 px-1"></p>
                 <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl mt-2">Save to Cloud</button>
             </form>
@@ -105,6 +114,22 @@
         </div>
     </div>
 
+    <div id="owners-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-30">
+        <div class="fixed bottom-0 inset-x-0 bg-white rounded-t-2xl p-6 max-w-md mx-auto shadow-xl max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-slate-900">Manage Owners</h2>
+                <button id="close-owners-btn" class="text-slate-400 hover:text-slate-600 p-1"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="new-owner-input" placeholder="e.g., Henry, Erin, Shared" class="flex-1 border border-slate-200 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                <button id="add-owner-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 flex items-center gap-1">
+                    <i data-lucide="plus" class="w-4 h-4"></i> Add
+                </button>
+            </div>
+            <div id="owners-list" class="space-y-2 overflow-y-auto flex-1 pb-4"></div>
+        </div>
+    </div>
+
     <script>
         // --- 🔑 CONFIGURATION ---
         const SUPABASE_URL = "https://quclamokiadmbockaqnn.supabase.co";
@@ -115,6 +140,7 @@
 
         let items = [];
         let masterLocations = [];
+        let masterOwners = [];
 
         const colorPalettes = [
             { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
@@ -347,6 +373,155 @@
             }
         }
 
+        // ── OWNERS ──────────────────────────────────────────────────────────
+
+        async function fetchOwners() {
+            const { data, error } = await supabaseClient
+                .from('owners')
+                .select('name, sort_order')
+                .order('sort_order', { ascending: true });
+            if (!error && data) {
+                masterOwners = data.map(o => o.name);
+                updateOwnerDropdown();
+            }
+        }
+
+        function updateOwnerDropdown(selectedOwner = '') {
+            const select = document.getElementById('form-owner');
+            select.innerHTML = '<option value="">— No owner —</option>' +
+                masterOwners.map(o => `<option value="${o}"${o === selectedOwner ? ' selected' : ''}>${o}</option>`).join('');
+        }
+
+        document.getElementById('open-owners-btn').addEventListener('click', () => {
+            renderOwnersMenu();
+            document.getElementById('owners-modal').classList.remove('hidden');
+        });
+        document.getElementById('close-owners-btn').addEventListener('click', () => {
+            document.getElementById('owners-modal').classList.add('hidden');
+        });
+
+        let ownerDragSrcIndex = null;
+
+        function renderOwnersMenu() {
+            const ownersList = document.getElementById('owners-list');
+            ownersList.innerHTML = '';
+            masterOwners.forEach((owner, index) => {
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 cursor-grab active:cursor-grabbing active:opacity-50 active:border-indigo-400 transition-opacity';
+                row.draggable = true;
+                row.dataset.index = index;
+                row.innerHTML = `
+                    <i data-lucide="grip-vertical" class="w-4 h-4 text-slate-300 shrink-0"></i>
+                    <span class="owner-view font-medium text-slate-800 flex-1">${owner}</span>
+                    <button class="owner-edit-btn text-slate-400 hover:text-indigo-500 p-1 transition-colors" title="Rename">
+                        <i data-lucide="pencil" class="w-4 h-4"></i>
+                    </button>
+                    <button class="owner-delete-btn text-slate-400 hover:text-red-500 p-1 transition-colors">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                    <input class="owner-input hidden flex-1 border border-indigo-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value="${owner}">
+                    <button class="owner-save-btn hidden text-indigo-500 hover:text-indigo-700 p-1" title="Save">
+                        <i data-lucide="check" class="w-4 h-4"></i>
+                    </button>
+                    <button class="owner-cancel-btn hidden text-slate-400 hover:text-slate-600 p-1" title="Cancel">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                `;
+
+                const viewSpan  = row.querySelector('.owner-view');
+                const editBtn   = row.querySelector('.owner-edit-btn');
+                const deleteBtn = row.querySelector('.owner-delete-btn');
+                const input     = row.querySelector('.owner-input');
+                const saveBtn   = row.querySelector('.owner-save-btn');
+                const cancelBtn = row.querySelector('.owner-cancel-btn');
+
+                const enterEdit = () => {
+                    row.draggable = false;
+                    [viewSpan, editBtn, deleteBtn].forEach(el => el.classList.add('hidden'));
+                    [input, saveBtn, cancelBtn].forEach(el => el.classList.remove('hidden'));
+                    input.focus(); input.select();
+                };
+                const exitEdit = () => {
+                    row.draggable = true;
+                    [viewSpan, editBtn, deleteBtn].forEach(el => el.classList.remove('hidden'));
+                    [input, saveBtn, cancelBtn].forEach(el => el.classList.add('hidden'));
+                };
+                const doSave = async () => {
+                    const newName = input.value.trim();
+                    if (!newName || newName === owner) { exitEdit(); return; }
+                    if (masterOwners.includes(newName)) { alert(`"${newName}" already exists.`); return; }
+                    exitEdit();
+                    await renameOwner(owner, newName);
+                };
+
+                editBtn.addEventListener('click', enterEdit);
+                cancelBtn.addEventListener('click', exitEdit);
+                saveBtn.addEventListener('click', doSave);
+                input.addEventListener('keydown', e => { if (e.key === 'Enter') doSave(); if (e.key === 'Escape') exitEdit(); });
+
+                deleteBtn.addEventListener('click', () => {
+                    if (confirm(`Remove "${owner}" from owners?`)) {
+                        setSyncing(true);
+                        supabaseClient.from('owners').delete().eq('name', owner).then(async () => {
+                            await fetchOwners();
+                            renderOwnersMenu();
+                        });
+                    }
+                });
+
+                row.addEventListener('dragstart', e => { ownerDragSrcIndex = index; e.dataTransfer.effectAllowed = 'move'; });
+                row.addEventListener('dragover',  e => { e.preventDefault(); row.classList.add('border-indigo-400'); });
+                row.addEventListener('dragleave', () => row.classList.remove('border-indigo-400'));
+                row.addEventListener('drop', async e => {
+                    e.preventDefault();
+                    row.classList.remove('border-indigo-400');
+                    const dest = parseInt(row.dataset.index);
+                    if (ownerDragSrcIndex === null || ownerDragSrcIndex === dest) return;
+                    const moved = masterOwners.splice(ownerDragSrcIndex, 1)[0];
+                    masterOwners.splice(dest, 0, moved);
+                    ownerDragSrcIndex = null;
+                    renderOwnersMenu();
+                    updateOwnerDropdown();
+                    await saveOwnerOrder();
+                });
+
+                ownersList.appendChild(row);
+            });
+            lucide.createIcons();
+        }
+
+        async function saveOwnerOrder() {
+            setSyncing(true);
+            await Promise.all(masterOwners.map((name, i) =>
+                supabaseClient.from('owners').update({ sort_order: i + 1 }).eq('name', name)
+            ));
+            setSyncing(false);
+        }
+
+        async function renameOwner(oldName, newName) {
+            setSyncing(true);
+            await supabaseClient.from('owners').update({ name: newName }).eq('name', oldName);
+            await supabaseClient.from('items').update({ owner: newName }).eq('owner', oldName);
+            await fetchOwners();
+            renderOwnersMenu();
+            await fetchItems();
+            setSyncing(false);
+        }
+
+        document.getElementById('add-owner-btn').addEventListener('click', async () => {
+            const input = document.getElementById('new-owner-input');
+            const newOwner = input.value.trim();
+            if (newOwner && !masterOwners.includes(newOwner)) {
+                setSyncing(true);
+                await supabaseClient.from('owners').insert([{ name: newOwner, sort_order: masterOwners.length + 1 }]);
+                input.value = '';
+                await fetchOwners();
+                renderOwnersMenu();
+            }
+        });
+
+        // ── END OWNERS ───────────────────────────────────────────────────────
+
         async function fetchItems() {
             setSyncing(true);
             const { data, error } = await supabaseClient
@@ -419,11 +594,14 @@
             const locationMap = { ...(existingItem?.location_map || {}) };
             locationMap[location] = sublocation;
 
+            const owner = document.getElementById('form-owner').value || null;
+
             const itemData = {
                 name: document.getElementById('form-name').value,
                 location,
                 sublocation,
-                location_map: locationMap
+                location_map: locationMap,
+                owner
             };
 
             if (id) {
@@ -458,6 +636,7 @@
                     document.getElementById('form-location').value = item.location;
                     document.getElementById('form-sublocation').value = item.sublocation === 'Unspecified' ? '' : item.sublocation;
                     updateSublocationSuggestions(item.location);
+                    updateOwnerDropdown(item.owner || '');
 
                     const map = item.location_map || {};
                     const known = Object.entries(map)
@@ -513,6 +692,20 @@
                 if (locIndex === -1) locIndex = 0;
                 const palette = colorPalettes[locIndex % colorPalettes.length];
 
+                const ownerPalettes = [
+                    { bg: 'bg-pink-50',   text: 'text-pink-700',   border: 'border-pink-200' },
+                    { bg: 'bg-cyan-50',   text: 'text-cyan-700',   border: 'border-cyan-200' },
+                    { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200' },
+                    { bg: 'bg-violet-50', text: 'text-violet-700', border: 'border-violet-200' },
+                ];
+                const ownerIdx = item.owner ? masterOwners.indexOf(item.owner) : -1;
+                const ownerPalette = ownerPalettes[Math.max(ownerIdx, 0) % ownerPalettes.length];
+                const ownerBadge = item.owner
+                    ? `<span class="px-2.5 py-1 rounded-lg text-xs font-bold border ${ownerPalette.bg} ${ownerPalette.text} ${ownerPalette.border} flex items-center gap-1">
+                           <i data-lucide="user" class="w-3 h-3"></i>${item.owner}
+                       </span>`
+                    : '';
+
                 itemEl.innerHTML = `
                     <div class="flex-1 min-w-0">
                         <h3 class="font-bold text-slate-900 truncate">${item.name}</h3>
@@ -520,7 +713,8 @@
                             <i data-lucide="layers" class="w-3 h-3"></i> ${item.sublocation}
                         </p>
                     </div>
-                    <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-2">
+                        ${ownerBadge}
                         <span onclick="cycleLocation(${item.id}, '${item.location}', event)" class="px-3 py-1.5 rounded-lg text-xs font-bold border ${palette.bg} ${palette.text} ${palette.border} transition-transform active:scale-95 cursor-pointer select-none" title="Tap to cycle location">
                             ${item.location}
                         </span>
@@ -538,7 +732,7 @@
 
         document.addEventListener('DOMContentLoaded', async () => {
             lucide.createIcons();
-            await fetchLocations();
+            await Promise.all([fetchLocations(), fetchOwners()]);
             await fetchItems();
         });
 
