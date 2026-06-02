@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WheresMy Cloud</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WheresMy">
+    <link rel="apple-touch-icon" href="icon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased pb-24">
+
+    <header class="bg-indigo-600 text-white sticky top-0 shadow-md z-10">
+        <div class="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">
+                <i data-lucide="cloud-lightning" class="w-5 h-5 text-amber-300"></i> WheresMy
+            </h1>
+            <div class="flex items-center gap-2">
+                <button id="open-locations-btn" class="text-white hover:text-indigo-200 p-1 bg-indigo-700 rounded-lg transition-colors" title="Manage Locations">
+                    <i data-lucide="map-pin" class="w-4 h-4"></i>
+                </button>
+                <div id="sync-indicator" class="text-xs bg-indigo-700 px-2.5 py-1 rounded-full flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Connected
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-md mx-auto px-4 mt-6">
+        <div class="text-xs text-slate-400 mb-2 px-1">💡 Tap item to edit • Tap location badge to cycle • Tap 📍 icon above to manage places</div>
+        <div class="relative mb-6">
+            <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                <i data-lucide="search" class="w-5 h-5"></i>
+            </span>
+            <input type="text" id="search-bar" placeholder="Search everywhere..." 
+                class="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-lg">
+        </div>
+
+        <div id="inventory-list" class="space-y-3"></div>
+
+        <div id="empty-state" class="hidden text-center py-12 text-slate-400">
+            <i data-lucide="package-open" class="w-12 h-12 mx-auto mb-3 text-slate-300"></i>
+            <p class="text-lg font-medium">No items found</p>
+        </div>
+    </main>
+
+    <div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-4 shadow-lg z-20">
+        <div class="max-w-md mx-auto">
+            <button id="open-modal-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors">
+                <i data-lucide="plus" class="w-5 h-5"></i> Add New Item
+            </button>
+        </div>
+    </div>
+
+    <div id="item-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-30">
+        <div class="fixed bottom-0 inset-x-0 bg-white rounded-t-2xl p-6 max-w-md mx-auto shadow-xl">
+            <div class="flex justify-between items-center mb-5">
+                <h2 id="modal-title" class="text-lg font-bold text-slate-900">Add New Item</h2>
+                <button id="close-modal-btn" class="text-slate-400 hover:text-slate-600 p-1"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+            <form id="item-form" class="space-y-4">
+                <input type="hidden" id="form-item-id">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Item Name</label>
+                    <input type="text" id="form-name" required class="w-full border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Location</label>
+                    <select id="form-location" required class="w-full border border-slate-200 bg-white rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Specific Room / Shelf</label>
+                    <input type="text" id="form-sublocation" class="w-full border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl mt-2">Save to Cloud</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="locations-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-30">
+        <div class="fixed bottom-0 inset-x-0 bg-white rounded-t-2xl p-6 max-w-md mx-auto shadow-xl max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-slate-900">Manage Custom Locations</h2>
+                <button id="close-locations-btn" class="text-slate-400 hover:text-slate-600 p-1"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+            
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="new-location-input" placeholder="e.g., Garage, Storage" class="flex-1 border border-slate-200 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                <button id="add-location-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-700 flex items-center gap-1">
+                    <i data-lucide="plus" class="w-4 h-4"></i> Add
+                </button>
+            </div>
+
+            <div id="locations-list" class="space-y-2 overflow-y-auto flex-1 pb-4">
+                </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 🔑 CONFIGURATION ---
+        const SUPABASE_URL = "https://quclamokiadmbockaqnn.supabase.co";
+        const SUPABASE_ANON_KEY = "sb_publishable_B4DZMPY5PQttDxu74dboyQ_3o_7uz2y";
+        // -------------------------
+
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        let items = [];
+        let masterLocations = [];
+
+        const colorPalettes = [
+            { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
+            { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
+            { bg: 'bg-sky-50', text: 'text-sky-700', border: 'border-sky-200' },
+            { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' }
+        ];
+
+        const inventoryList = document.getElementById('inventory-list');
+        const searchBar = document.getElementById('search-bar');
+        const emptyState = document.getElementById('empty-state');
+        const itemModal = document.getElementById('item-modal');
+        const itemForm = document.getElementById('item-form');
+        const locationsModal = document.getElementById('locations-modal');
+        const locationsList = document.getElementById('locations-list');
+        const syncIndicator = document.getElementById('sync-indicator');
+
+        async function fetchLocations() {
+            const { data, error } = await supabaseClient
+                .from('locations')
+                .select('name')
+                .order('name', { ascending: true });
+
+            if (!error && data) {
+                masterLocations = data.map(l => l.name);
+                updateLocationDropdown();
+                renderItems(searchBar.value);
+            } else {
+                console.error("Error fetching locations:", error);
+            }
+        }
+
+        function updateLocationDropdown() {
+            const select = document.getElementById('form-location');
+            select.innerHTML = masterLocations.map(loc => `<option value="${loc}">${loc}</option>`).join('');
+        }
+
+        document.getElementById('open-modal-btn').addEventListener('click', () => openItemModal());
+        document.getElementById('close-modal-btn').addEventListener('click', () => itemModal.classList.add('hidden'));
+        
+        document.getElementById('open-locations-btn').addEventListener('click', () => openLocationsModal());
+        document.getElementById('close-locations-btn').addEventListener('click', () => locationsModal.classList.add('hidden'));
+
+        function openLocationsModal() {
+            renderLocationsMenu();
+            locationsModal.classList.remove('hidden');
+        }
+
+        function renderLocationsMenu() {
+            locationsList.innerHTML = '';
+            masterLocations.forEach((loc) => {
+                const row = document.createElement('div');
+                row.className = 'flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200';
+                row.innerHTML = `
+                    <span class="font-medium text-slate-800">${loc}</span>
+                    <button onclick="removeLocationCloud('${loc}')" class="text-slate-400 hover:text-red-500 p-1 transition-colors">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                `;
+                locationsList.appendChild(row);
+            });
+            lucide.createIcons();
+        }
+
+        document.getElementById('add-location-btn').addEventListener('click', async () => {
+            const input = document.getElementById('new-location-input');
+            const newLoc = input.value.trim();
+            if (newLoc && !masterLocations.includes(newLoc)) {
+                setSyncing(true);
+                await supabaseClient.from('locations').insert([{ name: newLoc }]);
+                input.value = '';
+                await fetchLocations();
+                renderLocationsMenu();
+            }
+        });
+
+        window.removeLocationCloud = function(locName) {
+            if (masterLocations.length <= 1) {
+                alert("You need to keep at least one location options profile!");
+                return;
+            }
+            if (confirm(`Remove "${locName}" from cloud location choices?`)) {
+                setSyncing(true);
+                setTimeout(async () => {
+                    await supabaseClient.from('locations').delete().eq('name', locName);
+                    await fetchLocations();
+                    renderLocationsMenu();
+                }, 100);
+            }
+        }
+
+        async function fetchItems() {
+            setSyncing(true);
+            const { data, error } = await supabaseClient
+                .from('items')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (!error) {
+                items = data || [];
+                renderItems(searchBar.value);
+            } else {
+                console.error("Error fetching inventory items:", error);
+            }
+            setSyncing(false);
+        }
+
+        // UPGRADED: Cycles location AND safely wipes out obsolete sublocations!
+        window.cycleLocation = async function(id, currentUrlLocation, e) {
+            e.stopPropagation(); 
+            
+            if (masterLocations.length <= 1) {
+                alert("Add more options in the 📍 location menu to cycle places!");
+                return;
+            }
+
+            let currentIndex = masterLocations.indexOf(currentUrlLocation);
+            if (currentIndex === -1) currentIndex = 0;
+            
+            let nextIndex = (currentIndex + 1) % masterLocations.length;
+            const nextLocation = masterLocations[nextIndex];
+
+            // Safety Wiping System: Wipes out sublocation during location change
+            const clearedSublocation = 'Unspecified';
+
+            setSyncing(true);
+            const item = items.find(i => i.id === id);
+            if (item) {
+                item.location = nextLocation;
+                item.sublocation = clearedSublocation; // Clear local state immediately
+            }
+            renderItems(searchBar.value);
+
+            // Sync the location hop AND the cleared room status to Supabase at the same time
+            const { error } = await supabaseClient
+                .from('items')
+                .update({ 
+                    location: nextLocation,
+                    sublocation: clearedSublocation 
+                })
+                .eq('id', id);
+
+            if (error) {
+                console.error("Failed to sync cycled location:", error);
+                await fetchItems(); 
+            } else {
+                setSyncing(false);
+            }
+        }
+
+        itemForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setSyncing(true);
+            const id = document.getElementById('form-item-id').value;
+            const itemData = {
+                name: document.getElementById('form-name').value,
+                location: document.getElementById('form-location').value,
+                sublocation: document.getElementById('form-sublocation').value || 'Unspecified'
+            };
+
+            if (id) {
+                await supabaseClient.from('items').update(itemData).eq('id', id);
+            } else {
+                await supabaseClient.from('items').insert([itemData]);
+            }
+
+            itemForm.reset();
+            itemModal.classList.add('hidden');
+            await fetchItems();
+        });
+
+        window.deleteItem = async function(id, e) {
+            e.stopPropagation(); 
+            if(confirm("Delete this item permanently from cloud?")) {
+                setSyncing(true);
+                await supabaseClient.from('items').delete().eq('id', id);
+                await fetchItems();
+            }
+        }
+
+        window.openItemModal = function(id = null) {
+            if (id) {
+                const item = items.find(i => i.id == id);
+                if(item) {
+                    document.getElementById('modal-title').textContent = "Edit Item";
+                    document.getElementById('form-item-id').value = item.id;
+                    document.getElementById('form-name').value = item.name;
+                    document.getElementById('form-location').value = item.location;
+                    document.getElementById('form-sublocation').value = item.sublocation === 'Unspecified' ? '' : item.sublocation;
+                }
+            } else {
+                document.getElementById('modal-title').textContent = "Add New Item";
+                itemForm.reset();
+                document.getElementById('form-item-id').value = '';
+                if(masterLocations.length > 0) {
+                    document.getElementById('form-location').value = masterLocations[0];
+                }
+            }
+            itemModal.classList.remove('hidden');
+        }
+
+        function setSyncing(isSyncing) {
+            if (isSyncing) {
+                syncIndicator.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> Syncing...`;
+            } else {
+                syncIndicator.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span> Live Cloud`;
+            }
+        }
+
+        function renderItems(filterText = '') {
+            inventoryList.innerHTML = '';
+            const filteredItems = items.filter(item => 
+                (item.name || '').toLowerCase().includes(filterText.toLowerCase()) ||
+                (item.sublocation || '').toLowerCase().includes(filterText.toLowerCase()) ||
+                (item.location || '').toLowerCase().includes(filterText.toLowerCase())
+            );
+
+            if (filteredItems.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+            }
+
+            filteredItems.forEach(item => {
+                const itemEl = document.createElement('div');
+                itemEl.className = 'bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center gap-4 cursor-pointer hover:border-indigo-200 transition-colors';
+                itemEl.onclick = () => openItemModal(item.id);
+
+                let locIndex = masterLocations.indexOf(item.location);
+                if (locIndex === -1) locIndex = 0;
+                const palette = colorPalettes[locIndex % colorPalettes.length];
+
+                itemEl.innerHTML = `
+                    <div class="flex-1 min-w-0">
+                        <h3 class="font-bold text-slate-900 truncate">${item.name}</h3>
+                        <p class="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                            <i data-lucide="layers" class="w-3 h-3"></i> ${item.sublocation}
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span onclick="cycleLocation(${item.id}, '${item.location}', event)" class="px-3 py-1.5 rounded-lg text-xs font-bold border ${palette.bg} ${palette.text} ${palette.border} transition-transform active:scale-95 cursor-pointer select-none" title="Tap to cycle location">
+                            ${item.location}
+                        </span>
+                        <button onclick="deleteItem(${item.id}, event)" class="text-slate-300 hover:text-red-500 p-1 transition-colors">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                `;
+                inventoryList.appendChild(itemEl);
+            });
+            lucide.createIcons();
+        }
+
+        searchBar.addEventListener('input', (e) => renderItems(e.target.value));
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            lucide.createIcons();
+            await fetchLocations();
+            await fetchItems();
+        });
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js');
+        }
+    </script>
+</body>
+</html>
