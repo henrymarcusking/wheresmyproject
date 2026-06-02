@@ -37,12 +37,22 @@
 
     <main class="max-w-md mx-auto px-4 mt-6">
         <div class="text-xs text-slate-400 mb-2 px-1">💡 Tap item to edit • Tap location badge to cycle • Tap 📍 or 👥 above to manage places/owners</div>
-        <div class="relative mb-6">
-            <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
-                <i data-lucide="search" class="w-5 h-5"></i>
-            </span>
-            <input type="text" id="search-bar" placeholder="Search everywhere..." 
-                class="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-lg">
+        <div class="mb-4">
+            <div class="flex gap-2 mb-2">
+                <div class="relative flex-1">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                        <i data-lucide="search" class="w-5 h-5"></i>
+                    </span>
+                    <input type="text" id="search-bar" placeholder="Search everywhere..."
+                        class="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-lg">
+                </div>
+                <button id="open-filter-btn" class="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl shadow-sm text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors shrink-0">
+                    <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+                    <span id="filter-label" class="text-sm font-medium">Filter</span>
+                </button>
+            </div>
+            <!-- Active filter chips — hidden when no filters are set -->
+            <div id="active-filter-chips" class="hidden flex-wrap gap-2"></div>
         </div>
 
         <div id="inventory-list" class="space-y-3"></div>
@@ -114,6 +124,29 @@
         </div>
     </div>
 
+    <div id="filter-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-30">
+        <div class="fixed bottom-0 inset-x-0 bg-white rounded-t-2xl p-6 max-w-md mx-auto shadow-xl max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-5">
+                <h2 class="text-lg font-bold text-slate-900">Filter items</h2>
+                <button id="close-filter-btn" class="text-slate-400 hover:text-slate-600 p-1"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+            <div class="overflow-y-auto flex-1 space-y-5 pb-4">
+                <div id="filter-section-owners" class="hidden">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Owner</p>
+                    <div id="filter-owner-pills" class="flex flex-wrap gap-2"></div>
+                </div>
+                <div id="filter-section-locations" class="hidden">
+                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Location</p>
+                    <div id="filter-location-pills" class="flex flex-wrap gap-2"></div>
+                </div>
+            </div>
+            <div class="mt-4 flex gap-3">
+                <button id="clear-filters-btn" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 font-semibold hover:bg-slate-50 transition-colors">Clear all</button>
+                <button id="apply-filters-btn" class="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition-colors">Apply</button>
+            </div>
+        </div>
+    </div>
+
     <div id="owners-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-30">
         <div class="fixed bottom-0 inset-x-0 bg-white rounded-t-2xl p-6 max-w-md mx-auto shadow-xl max-h-[80vh] flex flex-col">
             <div class="flex justify-between items-center mb-4">
@@ -141,6 +174,7 @@
         let items = [];
         let masterLocations = [];
         let masterOwners = [];
+        const activeFilters = { owners: new Set(), locations: new Set() };
 
         const colorPalettes = [
             { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
@@ -670,11 +704,16 @@
 
         function renderItems(filterText = '') {
             inventoryList.innerHTML = '';
-            const filteredItems = items.filter(item => 
-                (item.name || '').toLowerCase().includes(filterText.toLowerCase()) ||
-                (item.sublocation || '').toLowerCase().includes(filterText.toLowerCase()) ||
-                (item.location || '').toLowerCase().includes(filterText.toLowerCase())
-            );
+            const filteredItems = items.filter(item => {
+                const text = filterText.toLowerCase();
+                const matchesSearch = !text ||
+                    (item.name || '').toLowerCase().includes(text) ||
+                    (item.sublocation || '').toLowerCase().includes(text) ||
+                    (item.location || '').toLowerCase().includes(text);
+                const matchesOwner    = activeFilters.owners.size === 0    || activeFilters.owners.has(item.owner || '');
+                const matchesLocation = activeFilters.locations.size === 0 || activeFilters.locations.has(item.location);
+                return matchesSearch && matchesOwner && matchesLocation;
+            });
 
             if (filteredItems.length === 0) {
                 emptyState.classList.remove('hidden');
@@ -727,6 +766,128 @@
             });
             lucide.createIcons();
         }
+
+        // ── FILTERS ─────────────────────────────────────────────────────────
+
+        function renderFilterSheet() {
+            // Owners section — only show if owners exist
+            const ownerSection = document.getElementById('filter-section-owners');
+            const ownerPillsEl = document.getElementById('filter-owner-pills');
+            if (masterOwners.length > 0) {
+                ownerSection.classList.remove('hidden');
+                ownerPillsEl.innerHTML = '';
+                masterOwners.forEach(owner => {
+                    const active = activeFilters.owners.has(owner);
+                    const btn = document.createElement('button');
+                    btn.textContent = owner;
+                    btn.className = `px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                        active
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-400'
+                    }`;
+                    btn.addEventListener('click', () => {
+                        activeFilters.owners.has(owner)
+                            ? activeFilters.owners.delete(owner)
+                            : activeFilters.owners.add(owner);
+                        renderFilterSheet();
+                        updateFilterUI();
+                        renderItems(searchBar.value);
+                    });
+                    ownerPillsEl.appendChild(btn);
+                });
+            } else {
+                ownerSection.classList.add('hidden');
+            }
+
+            // Locations section
+            const locSection = document.getElementById('filter-section-locations');
+            const locPillsEl = document.getElementById('filter-location-pills');
+            if (masterLocations.length > 0) {
+                locSection.classList.remove('hidden');
+                locPillsEl.innerHTML = '';
+                masterLocations.forEach(loc => {
+                    const active = activeFilters.locations.has(loc);
+                    const btn = document.createElement('button');
+                    btn.textContent = loc;
+                    btn.className = `px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                        active
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-400'
+                    }`;
+                    btn.addEventListener('click', () => {
+                        activeFilters.locations.has(loc)
+                            ? activeFilters.locations.delete(loc)
+                            : activeFilters.locations.add(loc);
+                        renderFilterSheet();
+                        updateFilterUI();
+                        renderItems(searchBar.value);
+                    });
+                    locPillsEl.appendChild(btn);
+                });
+            } else {
+                locSection.classList.add('hidden');
+            }
+        }
+
+        function updateFilterUI() {
+            const totalActive = activeFilters.owners.size + activeFilters.locations.size;
+            const filterLabel = document.getElementById('filter-label');
+            const openBtn = document.getElementById('open-filter-btn');
+            const chipsEl = document.getElementById('active-filter-chips');
+
+            // Update button label and highlight
+            filterLabel.textContent = totalActive > 0 ? `Filter (${totalActive})` : 'Filter';
+            openBtn.classList.toggle('border-indigo-500', totalActive > 0);
+            openBtn.classList.toggle('text-indigo-600', totalActive > 0);
+            openBtn.classList.toggle('bg-indigo-50', totalActive > 0);
+
+            // Render dismissible chips
+            if (totalActive > 0) {
+                chipsEl.classList.remove('hidden');
+                chipsEl.classList.add('flex');
+                chipsEl.innerHTML = '';
+                [...activeFilters.owners].forEach(owner => {
+                    chipsEl.appendChild(makeChip(owner, () => {
+                        activeFilters.owners.delete(owner);
+                        updateFilterUI(); renderFilterSheet(); renderItems(searchBar.value);
+                    }));
+                });
+                [...activeFilters.locations].forEach(loc => {
+                    chipsEl.appendChild(makeChip(loc, () => {
+                        activeFilters.locations.delete(loc);
+                        updateFilterUI(); renderFilterSheet(); renderItems(searchBar.value);
+                    }));
+                });
+            } else {
+                chipsEl.classList.add('hidden');
+                chipsEl.classList.remove('flex');
+            }
+        }
+
+        function makeChip(label, onRemove) {
+            const chip = document.createElement('span');
+            chip.className = 'inline-flex items-center gap-1 pl-3 pr-2 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700 border border-indigo-200';
+            chip.innerHTML = `${label}<button class="ml-0.5 hover:text-indigo-900 transition-colors"><i data-lucide="x" class="w-3 h-3"></i></button>`;
+            chip.querySelector('button').addEventListener('click', onRemove);
+            return chip;
+        }
+
+        document.getElementById('open-filter-btn').addEventListener('click', () => {
+            renderFilterSheet();
+            document.getElementById('filter-modal').classList.remove('hidden');
+        });
+        const closeFilterModal = () => document.getElementById('filter-modal').classList.add('hidden');
+        document.getElementById('close-filter-btn').addEventListener('click', closeFilterModal);
+        document.getElementById('apply-filters-btn').addEventListener('click', closeFilterModal);
+        document.getElementById('clear-filters-btn').addEventListener('click', () => {
+            activeFilters.owners.clear();
+            activeFilters.locations.clear();
+            renderFilterSheet();
+            updateFilterUI();
+            renderItems(searchBar.value);
+        });
+
+        // ── END FILTERS ──────────────────────────────────────────────────────
 
         searchBar.addEventListener('input', (e) => renderItems(e.target.value));
 
