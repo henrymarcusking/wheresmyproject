@@ -77,7 +77,8 @@
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">Specific Room / Shelf</label>
-                    <input type="text" id="form-sublocation" class="w-full border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <input type="text" id="form-sublocation" list="sublocation-suggestions" autocomplete="off" class="w-full border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <datalist id="sublocation-suggestions"></datalist>
                 </div>
                 <p id="home-hint" class="text-xs text-slate-400 px-1"></p>
                 <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl mt-2">Save to Cloud</button>
@@ -150,6 +151,21 @@
             const select = document.getElementById('form-location');
             select.innerHTML = masterLocations.map(loc => `<option value="${loc}">${loc}</option>`).join('');
         }
+
+        function updateSublocationSuggestions(location) {
+            const datalist = document.getElementById('sublocation-suggestions');
+            // Collect unique non-trivial sublocations used for this location across all items
+            const suggestions = [...new Set(
+                items
+                    .map(item => (item.location_map || {})[location])
+                    .filter(sub => sub && sub !== 'Unspecified')
+            )];
+            datalist.innerHTML = suggestions.map(s => `<option value="${s}">`).join('');
+        }
+
+        document.getElementById('form-location').addEventListener('change', e => {
+            updateSublocationSuggestions(e.target.value);
+        });
 
         document.getElementById('open-modal-btn').addEventListener('click', () => openItemModal());
         document.getElementById('close-modal-btn').addEventListener('click', () => itemModal.classList.add('hidden'));
@@ -441,6 +457,7 @@
                     document.getElementById('form-name').value = item.name;
                     document.getElementById('form-location').value = item.location;
                     document.getElementById('form-sublocation').value = item.sublocation === 'Unspecified' ? '' : item.sublocation;
+                    updateSublocationSuggestions(item.location);
 
                     const map = item.location_map || {};
                     const known = Object.entries(map)
@@ -458,6 +475,7 @@
                 homeHint.textContent = '💡 The room you enter will be remembered for each location.';
                 if(masterLocations.length > 0) {
                     document.getElementById('form-location').value = masterLocations[0];
+                    updateSublocationSuggestions(masterLocations[0]);
                 }
             }
             itemModal.classList.remove('hidden');
