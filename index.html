@@ -49,7 +49,10 @@
                         <i data-lucide="search" class="w-5 h-5"></i>
                     </span>
                     <input type="text" id="search-bar" placeholder="Search everywhere..."
-                        class="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-lg">
+                        class="w-full pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-lg">
+                    <button id="search-clear-btn" class="hidden absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 transition-colors">
+                        <i data-lucide="x" class="w-5 h-5"></i>
+                    </button>
                 </div>
                 <button id="open-filter-btn" class="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl shadow-sm text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors shrink-0">
                     <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
@@ -1073,7 +1076,19 @@
 
         // ── END FILTERS ──────────────────────────────────────────────────────
 
-        searchBar.addEventListener('input', (e) => renderItems(e.target.value));
+        const searchClearBtn = document.getElementById('search-clear-btn');
+
+        searchBar.addEventListener('input', (e) => {
+            renderItems(e.target.value);
+            searchClearBtn.classList.toggle('hidden', !e.target.value);
+        });
+
+        searchClearBtn.addEventListener('click', () => {
+            searchBar.value = '';
+            searchBar.focus();
+            searchClearBtn.classList.add('hidden');
+            renderItems('');
+        });
 
         document.addEventListener('DOMContentLoaded', async () => {
             lucide.createIcons();
