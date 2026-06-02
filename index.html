@@ -1110,29 +1110,36 @@
 
         const SpeechRecog = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
+        let voiceFinalTranscript = '';
+        let voiceSilenceTimer = null;
+        let voiceMaxTimer = null;
 
         if (SpeechRecog) {
-            // Show the mic button now that we know the browser supports it
             document.getElementById('voice-add-btn').classList.remove('hidden');
-
             recognition = new SpeechRecog();
-            recognition.continuous    = false;
-            recognition.interimResults = false;
-            recognition.lang          = 'en-US';
+            recognition.continuous     = true;   // keep listening through pauses
+            recognition.interimResults = true;   // show live feedback as words come in
+            recognition.lang           = 'en-US';
             recognition.maxAlternatives = 1;
         }
 
+        // Strips accents so "Malmö"→"Malmo", "La Casita"→"La Casita" etc.
+        // This lets us match what speech recognition actually produces
+        function voiceNorm(s) {
+            return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+        }
+
         function setVoiceBanner(state, message) {
-            const banner   = document.getElementById('voice-banner');
-            const icon     = document.getElementById('voice-banner-icon');
-            const text     = document.getElementById('voice-banner-text');
+            const banner      = document.getElementById('voice-banner');
+            const icon        = document.getElementById('voice-banner-icon');
+            const text        = document.getElementById('voice-banner-text');
             const relistenBtn = document.getElementById('voice-relisten-btn');
-            const voiceBtn = document.getElementById('voice-add-btn');
+            const voiceBtn    = document.getElementById('voice-add-btn');
 
             if (state === 'hidden') {
                 banner.classList.add('hidden');
                 banner.classList.remove('flex');
-                voiceBtn && voiceBtn.classList.remove('opacity-50');
+                voiceBtn?.classList.remove('opacity-50');
                 return;
             }
             banner.classList.remove('hidden');
@@ -1143,49 +1150,51 @@
                 icon.classList.add('animate-pulse');
                 text.textContent = message || 'Listening… say the item name, location and room';
                 relistenBtn.classList.add('hidden');
-                voiceBtn && voiceBtn.classList.add('opacity-50');
+                voiceBtn?.classList.add('opacity-50');
             } else if (state === 'heard') {
                 icon.textContent = '✓';
                 icon.classList.remove('animate-pulse');
                 text.textContent = message;
                 relistenBtn.classList.remove('hidden');
-                voiceBtn && voiceBtn.classList.remove('opacity-50');
+                voiceBtn?.classList.remove('opacity-50');
             } else if (state === 'error') {
                 icon.textContent = '⚠️';
                 icon.classList.remove('animate-pulse');
                 text.textContent = message || 'Couldn\'t hear that — tap "Try again"';
                 relistenBtn.classList.remove('hidden');
-                voiceBtn && voiceBtn.classList.remove('opacity-50');
+                voiceBtn?.classList.remove('opacity-50');
             }
         }
 
         function parseVoiceTranscript(transcript) {
-            const original = transcript.trim();
-            const lower    = original.toLowerCase();
+            const original   = transcript.trim();
+            const normT      = voiceNorm(original);
 
-            let name       = original;
-            let location   = null;
-            let sublocation = '';
+            let name         = original;
+            let location     = null;
+            let sublocation  = '';
 
-            // Find the first matching location name in the transcript
+            // Match location names with accent-normalised comparison
             for (const loc of masterLocations) {
-                const locIdx = lower.indexOf(loc.toLowerCase());
-                if (locIdx !== -1) {
-                    // Strip item name of trailing connectors and punctuation
-                    const namePart = original.substring(0, locIdx)
+                const normLoc = voiceNorm(loc);
+                const idx = normT.indexOf(normLoc);
+                if (idx !== -1) {
+                    // namePart: everything before the location, minus trailing connectors
+                    const namePart = original.substring(0, idx)
                         .replace(/\b(at|in|to|for|into|from)\s*$/i, '')
                         .replace(/[\s,;:]+$/, '')
                         .trim();
 
-                    // Strip sublocation of leading connectors
-                    const subPart = original.substring(locIdx + loc.length)
-                        .replace(/^[\s,]*(in the|at the|on the|in|at|on|from|inside)\s*/i, '')
+                    // subPart: everything after the location, minus leading connectors
+                    // Use normLoc.length as the offset since norm rarely changes char count
+                    const subPart = original.substring(idx + normLoc.length)
+                        .replace(/^[\s,]*(in the|at the|on the|in|at|on|from|inside|called)\s*/i, '')
                         .replace(/^[\s,;:]+/, '')
                         .trim();
 
                     if (namePart) name = namePart;
-                    location = loc;
-                    if (subPart) sublocation = subPart;
+                    location   = loc;       // use the real location name, not the heard version
+                    sublocation = subPart;
                     break;
                 }
             }
@@ -1195,9 +1204,7 @@
 
         function fillFormFromVoice(transcript) {
             const { name, location, sublocation } = parseVoiceTranscript(transcript);
-
             document.getElementById('form-name').value = name;
-
             if (location) {
                 document.getElementById('form-location').value = location;
                 updateSublocationSuggestions(location);
@@ -1205,63 +1212,92 @@
             if (sublocation) {
                 document.getElementById('form-sublocation').value = sublocation;
             }
-
-            // Show what was heard with a "Try again" option
             setVoiceBanner('heard', `Heard: "${transcript}"`);
+        }
+
+        function stopListening() {
+            clearTimeout(voiceSilenceTimer);
+            clearTimeout(voiceMaxTimer);
+            try { recognition?.stop(); } catch(e) {}
         }
 
         function startListening() {
             if (!recognition) return;
 
+            voiceFinalTranscript = '';
+            clearTimeout(voiceSilenceTimer);
+            clearTimeout(voiceMaxTimer);
             setVoiceBanner('listening');
 
             recognition.onresult = (e) => {
-                const transcript = e.results[0][0].transcript;
-                fillFormFromVoice(transcript);
+                let interim = '';
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    if (e.results[i].isFinal) {
+                        voiceFinalTranscript += e.results[i][0].transcript + ' ';
+                    } else {
+                        interim = e.results[i][0].transcript;
+                    }
+                }
+                // Show live feedback
+                const preview = (voiceFinalTranscript + interim).trim();
+                if (preview) setVoiceBanner('listening', `Hearing: "${preview}"`);
+
+                // Auto-stop 1.5 s after speech goes quiet
+                clearTimeout(voiceSilenceTimer);
+                voiceSilenceTimer = setTimeout(() => stopListening(), 1500);
             };
 
             recognition.onerror = (e) => {
+                clearTimeout(voiceSilenceTimer);
+                clearTimeout(voiceMaxTimer);
                 if (e.error === 'aborted') return;
-                const msg = e.error === 'no-speech'
+                setVoiceBanner('error', e.error === 'no-speech'
                     ? 'Nothing heard — tap "Try again"'
-                    : 'Microphone error — tap "Try again"';
-                setVoiceBanner('error', msg);
+                    : 'Microphone error — tap "Try again"');
             };
 
             recognition.onend = () => {
-                // If still in listening state (no result, no error), show error
-                const icon = document.getElementById('voice-banner-icon');
-                if (icon && icon.classList.contains('animate-pulse')) {
-                    setVoiceBanner('error', 'Nothing heard — tap "Try again"');
+                clearTimeout(voiceSilenceTimer);
+                clearTimeout(voiceMaxTimer);
+                const result = voiceFinalTranscript.trim();
+                if (result) {
+                    fillFormFromVoice(result);
+                } else {
+                    // Only show error if we're still in listening state
+                    const icon = document.getElementById('voice-banner-icon');
+                    if (icon?.classList.contains('animate-pulse')) {
+                        setVoiceBanner('error', 'Nothing clear heard — tap "Try again"');
+                    }
                 }
+                voiceFinalTranscript = '';
             };
+
+            // Safety net: stop after 12 s max
+            voiceMaxTimer = setTimeout(() => stopListening(), 12000);
 
             try {
                 recognition.start();
             } catch (e) {
-                // Already running — abort and retry
                 recognition.abort();
                 setTimeout(() => recognition.start(), 300);
             }
         }
 
         function startVoiceAdd() {
-            openItemModal();                  // open the add form
-            setTimeout(startListening, 250);  // brief delay for modal to appear
+            openItemModal();
+            setTimeout(startListening, 250);
         }
 
         document.getElementById('voice-add-btn')?.addEventListener('click', startVoiceAdd);
 
         document.getElementById('voice-relisten-btn').addEventListener('click', () => {
-            // Clear the fields and listen again
             document.getElementById('form-name').value = '';
             document.getElementById('form-sublocation').value = '';
             startListening();
         });
 
-        // Also hide the voice banner when the modal closes
         document.getElementById('close-modal-btn').addEventListener('click', () => {
-            recognition?.abort();
+            stopListening();
             setVoiceBanner('hidden');
         });
 
