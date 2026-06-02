@@ -58,6 +58,7 @@
             </div>
             <!-- Active filter chips — hidden when no filters are set -->
             <div id="active-filter-chips" class="hidden flex-wrap gap-2"></div>
+            <button id="inline-clear-filters-btn" class="hidden w-full mt-2 py-2 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm font-semibold hover:bg-slate-50 transition-colors">Clear all filters</button>
         </div>
 
         <div id="inventory-list" class="space-y-3"></div>
@@ -998,6 +999,7 @@
             const filterLabel = document.getElementById('filter-label');
             const openBtn = document.getElementById('open-filter-btn');
             const chipsEl = document.getElementById('active-filter-chips');
+            const inlineClearBtn = document.getElementById('inline-clear-filters-btn');
 
             // Update button label and highlight
             filterLabel.textContent = totalActive > 0 ? `Filter (${totalActive})` : 'Filter';
@@ -1009,6 +1011,7 @@
             if (totalActive > 0) {
                 chipsEl.classList.remove('hidden');
                 chipsEl.classList.add('flex');
+                inlineClearBtn.classList.remove('hidden');
                 chipsEl.innerHTML = '';
                 if (activeFilters.lostOnly) {
                     chipsEl.appendChild(makeChip('🔴 Lost only', () => {
@@ -1037,6 +1040,7 @@
             } else {
                 chipsEl.classList.add('hidden');
                 chipsEl.classList.remove('flex');
+                inlineClearBtn.classList.add('hidden');
             }
         }
 
@@ -1055,7 +1059,7 @@
         const closeFilterModal = () => document.getElementById('filter-modal').classList.add('hidden');
         document.getElementById('close-filter-btn').addEventListener('click', closeFilterModal);
         document.getElementById('apply-filters-btn').addEventListener('click', closeFilterModal);
-        document.getElementById('clear-filters-btn').addEventListener('click', () => {
+        function clearAllFilters() {
             activeFilters.owners.clear();
             activeFilters.locations.clear();
             activeFilters.lostOnly = false;
@@ -1063,7 +1067,9 @@
             renderFilterSheet();
             updateFilterUI();
             renderItems(searchBar.value);
-        });
+        }
+        document.getElementById('clear-filters-btn').addEventListener('click', clearAllFilters);
+        document.getElementById('inline-clear-filters-btn').addEventListener('click', clearAllFilters);
 
         // ── END FILTERS ──────────────────────────────────────────────────────
 
