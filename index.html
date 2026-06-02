@@ -734,10 +734,18 @@
                 lostBanner.classList.add('hidden');
                 lostBtn.classList.add('hidden');
                 submitBtn.textContent = 'Save to Cloud';
-                if(masterLocations.length > 0) {
-                    document.getElementById('form-location').value = masterLocations[0];
-                    updateSublocationSuggestions(masterLocations[0]);
+
+                // Pre-set location from filter if exactly one is active; otherwise use first in list
+                const filteredLoc = activeFilters.locations.size === 1 ? [...activeFilters.locations][0] : null;
+                const defaultLoc = filteredLoc || (masterLocations.length > 0 ? masterLocations[0] : null);
+                if (defaultLoc) {
+                    document.getElementById('form-location').value = defaultLoc;
+                    updateSublocationSuggestions(defaultLoc);
                 }
+
+                // Pre-set owner from filter if exactly one is active
+                const filteredOwner = activeFilters.owners.size === 1 ? [...activeFilters.owners][0] : null;
+                if (filteredOwner) updateOwnerDropdown(filteredOwner);
             }
             itemModal.classList.remove('hidden');
         }
