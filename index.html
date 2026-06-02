@@ -73,9 +73,13 @@
     </main>
 
     <div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-4 shadow-lg z-20">
-        <div class="max-w-md mx-auto">
-            <button id="open-modal-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors">
+        <div class="max-w-md mx-auto flex gap-3">
+            <button id="open-modal-btn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors">
                 <i data-lucide="plus" class="w-5 h-5"></i> Add New Item
+            </button>
+            <!-- Hidden until JS confirms browser supports speech recognition -->
+            <button id="voice-add-btn" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center transition-colors" title="Add by voice">
+                <i data-lucide="mic" class="w-5 h-5"></i>
             </button>
         </div>
     </div>
@@ -88,6 +92,14 @@
             </div>
             <form id="item-form" class="space-y-4">
                 <input type="hidden" id="form-item-id">
+
+                <!-- Voice listening state — shown while mic is active -->
+                <div id="voice-banner" class="hidden items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+                    <span id="voice-banner-icon" class="text-xl">🎤</span>
+                    <p id="voice-banner-text" class="text-sm font-semibold text-indigo-700 flex-1">Listening… say the item name, location and room</p>
+                    <button type="button" id="voice-relisten-btn" class="hidden shrink-0 text-xs font-semibold text-indigo-500 underline">Try again</button>
+                </div>
+
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">Item Name</label>
                     <input type="text" id="form-name" required class="w-full border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
@@ -702,6 +714,8 @@
 
             itemForm.reset();
             itemModal.classList.add('hidden');
+            recognition?.abort();
+            setVoiceBanner('hidden');
             await fetchItems();
         });
 
@@ -720,6 +734,8 @@
             await supabaseClient.from('items').update({ lost: true }).eq('id', id);
             itemForm.reset();
             itemModal.classList.add('hidden');
+            recognition?.abort();
+            setVoiceBanner('hidden');
             await fetchItems();
         });
 
@@ -1089,6 +1105,167 @@
             searchClearBtn.classList.add('hidden');
             renderItems('');
         });
+
+        // ── VOICE ADD ────────────────────────────────────────────────────────
+
+        const SpeechRecog = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+
+        if (SpeechRecog) {
+            // Show the mic button now that we know the browser supports it
+            document.getElementById('voice-add-btn').classList.remove('hidden');
+
+            recognition = new SpeechRecog();
+            recognition.continuous    = false;
+            recognition.interimResults = false;
+            recognition.lang          = 'en-US';
+            recognition.maxAlternatives = 1;
+        }
+
+        function setVoiceBanner(state, message) {
+            const banner   = document.getElementById('voice-banner');
+            const icon     = document.getElementById('voice-banner-icon');
+            const text     = document.getElementById('voice-banner-text');
+            const relistenBtn = document.getElementById('voice-relisten-btn');
+            const voiceBtn = document.getElementById('voice-add-btn');
+
+            if (state === 'hidden') {
+                banner.classList.add('hidden');
+                banner.classList.remove('flex');
+                voiceBtn && voiceBtn.classList.remove('opacity-50');
+                return;
+            }
+            banner.classList.remove('hidden');
+            banner.classList.add('flex');
+
+            if (state === 'listening') {
+                icon.textContent = '🎤';
+                icon.classList.add('animate-pulse');
+                text.textContent = message || 'Listening… say the item name, location and room';
+                relistenBtn.classList.add('hidden');
+                voiceBtn && voiceBtn.classList.add('opacity-50');
+            } else if (state === 'heard') {
+                icon.textContent = '✓';
+                icon.classList.remove('animate-pulse');
+                text.textContent = message;
+                relistenBtn.classList.remove('hidden');
+                voiceBtn && voiceBtn.classList.remove('opacity-50');
+            } else if (state === 'error') {
+                icon.textContent = '⚠️';
+                icon.classList.remove('animate-pulse');
+                text.textContent = message || 'Couldn\'t hear that — tap "Try again"';
+                relistenBtn.classList.remove('hidden');
+                voiceBtn && voiceBtn.classList.remove('opacity-50');
+            }
+        }
+
+        function parseVoiceTranscript(transcript) {
+            const original = transcript.trim();
+            const lower    = original.toLowerCase();
+
+            let name       = original;
+            let location   = null;
+            let sublocation = '';
+
+            // Find the first matching location name in the transcript
+            for (const loc of masterLocations) {
+                const locIdx = lower.indexOf(loc.toLowerCase());
+                if (locIdx !== -1) {
+                    // Strip item name of trailing connectors and punctuation
+                    const namePart = original.substring(0, locIdx)
+                        .replace(/\b(at|in|to|for|into|from)\s*$/i, '')
+                        .replace(/[\s,;:]+$/, '')
+                        .trim();
+
+                    // Strip sublocation of leading connectors
+                    const subPart = original.substring(locIdx + loc.length)
+                        .replace(/^[\s,]*(in the|at the|on the|in|at|on|from|inside)\s*/i, '')
+                        .replace(/^[\s,;:]+/, '')
+                        .trim();
+
+                    if (namePart) name = namePart;
+                    location = loc;
+                    if (subPart) sublocation = subPart;
+                    break;
+                }
+            }
+
+            return { name, location, sublocation };
+        }
+
+        function fillFormFromVoice(transcript) {
+            const { name, location, sublocation } = parseVoiceTranscript(transcript);
+
+            document.getElementById('form-name').value = name;
+
+            if (location) {
+                document.getElementById('form-location').value = location;
+                updateSublocationSuggestions(location);
+            }
+            if (sublocation) {
+                document.getElementById('form-sublocation').value = sublocation;
+            }
+
+            // Show what was heard with a "Try again" option
+            setVoiceBanner('heard', `Heard: "${transcript}"`);
+        }
+
+        function startListening() {
+            if (!recognition) return;
+
+            setVoiceBanner('listening');
+
+            recognition.onresult = (e) => {
+                const transcript = e.results[0][0].transcript;
+                fillFormFromVoice(transcript);
+            };
+
+            recognition.onerror = (e) => {
+                if (e.error === 'aborted') return;
+                const msg = e.error === 'no-speech'
+                    ? 'Nothing heard — tap "Try again"'
+                    : 'Microphone error — tap "Try again"';
+                setVoiceBanner('error', msg);
+            };
+
+            recognition.onend = () => {
+                // If still in listening state (no result, no error), show error
+                const icon = document.getElementById('voice-banner-icon');
+                if (icon && icon.classList.contains('animate-pulse')) {
+                    setVoiceBanner('error', 'Nothing heard — tap "Try again"');
+                }
+            };
+
+            try {
+                recognition.start();
+            } catch (e) {
+                // Already running — abort and retry
+                recognition.abort();
+                setTimeout(() => recognition.start(), 300);
+            }
+        }
+
+        function startVoiceAdd() {
+            openItemModal();                  // open the add form
+            setTimeout(startListening, 250);  // brief delay for modal to appear
+        }
+
+        document.getElementById('voice-add-btn')?.addEventListener('click', startVoiceAdd);
+
+        document.getElementById('voice-relisten-btn').addEventListener('click', () => {
+            // Clear the fields and listen again
+            document.getElementById('form-name').value = '';
+            document.getElementById('form-sublocation').value = '';
+            startListening();
+        });
+
+        // Also hide the voice banner when the modal closes
+        document.getElementById('close-modal-btn').addEventListener('click', () => {
+            recognition?.abort();
+            setVoiceBanner('hidden');
+        });
+
+        // ── END VOICE ADD ────────────────────────────────────────────────────
 
         document.addEventListener('DOMContentLoaded', async () => {
             lucide.createIcons();
