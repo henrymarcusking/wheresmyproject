@@ -134,8 +134,8 @@
         async function fetchLocations() {
             const { data, error } = await supabaseClient
                 .from('locations')
-                .select('name')
-                .order('name', { ascending: true });
+                .select('name, sort_order')
+                .order('sort_order', { ascending: true });
 
             if (!error && data) {
                 masterLocations = data.map(l => l.name);
@@ -162,20 +162,145 @@
             locationsModal.classList.remove('hidden');
         }
 
+        let dragSrcIndex = null;
+
         function renderLocationsMenu() {
             locationsList.innerHTML = '';
-            masterLocations.forEach((loc) => {
+            masterLocations.forEach((loc, index) => {
                 const row = document.createElement('div');
-                row.className = 'flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200';
+                row.className = 'flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 cursor-grab active:cursor-grabbing active:opacity-50 active:border-indigo-400 transition-opacity';
+                row.draggable = true;
+                row.dataset.index = index;
                 row.innerHTML = `
-                    <span class="font-medium text-slate-800">${loc}</span>
-                    <button onclick="removeLocationCloud('${loc}')" class="text-slate-400 hover:text-red-500 p-1 transition-colors">
+                    <i data-lucide="grip-vertical" class="w-4 h-4 text-slate-300 shrink-0"></i>
+
+                    <!-- View mode -->
+                    <span class="loc-view font-medium text-slate-800 flex-1">${loc}</span>
+                    <button class="loc-edit-btn text-slate-400 hover:text-indigo-500 p-1 transition-colors" title="Rename">
+                        <i data-lucide="pencil" class="w-4 h-4"></i>
+                    </button>
+                    <button onclick="removeLocationCloud('${loc}')" class="loc-delete-btn text-slate-400 hover:text-red-500 p-1 transition-colors">
                         <i data-lucide="trash-2" class="w-4 h-4"></i>
                     </button>
+
+                    <!-- Edit mode (hidden by default) -->
+                    <input class="loc-input hidden flex-1 border border-indigo-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" value="${loc}">
+                    <button class="loc-save-btn hidden text-indigo-500 hover:text-indigo-700 p-1 transition-colors" title="Save">
+                        <i data-lucide="check" class="w-4 h-4"></i>
+                    </button>
+                    <button class="loc-cancel-btn hidden text-slate-400 hover:text-slate-600 p-1 transition-colors" title="Cancel">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
                 `;
+
+                // Wire up inline edit toggle
+                const viewSpan   = row.querySelector('.loc-view');
+                const editBtn    = row.querySelector('.loc-edit-btn');
+                const deleteBtn  = row.querySelector('.loc-delete-btn');
+                const input      = row.querySelector('.loc-input');
+                const saveBtn    = row.querySelector('.loc-save-btn');
+                const cancelBtn  = row.querySelector('.loc-cancel-btn');
+
+                const enterEdit = () => {
+                    row.draggable = false; // disable drag while editing
+                    [viewSpan, editBtn, deleteBtn].forEach(el => el.classList.add('hidden'));
+                    [input, saveBtn, cancelBtn].forEach(el => el.classList.remove('hidden'));
+                    input.focus();
+                    input.select();
+                };
+                const exitEdit = () => {
+                    row.draggable = true;
+                    [viewSpan, editBtn, deleteBtn].forEach(el => el.classList.remove('hidden'));
+                    [input, saveBtn, cancelBtn].forEach(el => el.classList.add('hidden'));
+                };
+                const doSave = async () => {
+                    const newName = input.value.trim();
+                    if (!newName || newName === loc) { exitEdit(); return; }
+                    if (masterLocations.includes(newName)) {
+                        alert(`"${newName}" already exists.`);
+                        return;
+                    }
+                    exitEdit();
+                    await renameLocation(loc, newName);
+                };
+
+                editBtn.addEventListener('click', enterEdit);
+                cancelBtn.addEventListener('click', exitEdit);
+                saveBtn.addEventListener('click', doSave);
+                input.addEventListener('keydown', e => {
+                    if (e.key === 'Enter')  doSave();
+                    if (e.key === 'Escape') exitEdit();
+                });
+                row.addEventListener('dragstart', e => {
+                    dragSrcIndex = index;
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+                row.addEventListener('dragover', e => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    row.classList.add('border-indigo-400');
+                });
+                row.addEventListener('dragleave', () => {
+                    row.classList.remove('border-indigo-400');
+                });
+                row.addEventListener('drop', async e => {
+                    e.preventDefault();
+                    row.classList.remove('border-indigo-400');
+                    const destIndex = parseInt(row.dataset.index);
+                    if (dragSrcIndex === null || dragSrcIndex === destIndex) return;
+                    // Reorder the local array
+                    const moved = masterLocations.splice(dragSrcIndex, 1)[0];
+                    masterLocations.splice(destIndex, 0, moved);
+                    dragSrcIndex = null;
+                    renderLocationsMenu();
+                    updateLocationDropdown();
+                    renderItems(searchBar.value);
+                    await saveLocationOrder();
+                });
                 locationsList.appendChild(row);
             });
             lucide.createIcons();
+        }
+
+        async function saveLocationOrder() {
+            setSyncing(true);
+            await Promise.all(
+                masterLocations.map((name, i) =>
+                    supabaseClient.from('locations').update({ sort_order: i + 1 }).eq('name', name)
+                )
+            );
+            setSyncing(false);
+        }
+
+        async function renameLocation(oldName, newName) {
+            setSyncing(true);
+
+            // 1. Rename in the locations table
+            await supabaseClient.from('locations').update({ name: newName }).eq('name', oldName);
+
+            // 2. Update items whose current location matches
+            await supabaseClient.from('items').update({ location: newName }).eq('location', oldName);
+
+            // 3. Update items whose default_location matches (legacy column)
+            await supabaseClient.from('items').update({ default_location: newName }).eq('default_location', oldName);
+
+            // 4. Update location_map keys for any item that has an entry for the old name
+            const { data: affected } = await supabaseClient
+                .from('items').select('id, location_map').not('location_map', 'is', null);
+            await Promise.all((affected || [])
+                .filter(item => oldName in (item.location_map || {}))
+                .map(item => {
+                    const newMap = {};
+                    for (const [k, v] of Object.entries(item.location_map)) {
+                        newMap[k === oldName ? newName : k] = v;
+                    }
+                    return supabaseClient.from('items').update({ location_map: newMap }).eq('id', item.id);
+                })
+            );
+
+            await fetchLocations();
+            renderLocationsMenu();
+            setSyncing(false);
         }
 
         document.getElementById('add-location-btn').addEventListener('click', async () => {
@@ -183,7 +308,8 @@
             const newLoc = input.value.trim();
             if (newLoc && !masterLocations.includes(newLoc)) {
                 setSyncing(true);
-                await supabaseClient.from('locations').insert([{ name: newLoc }]);
+                const nextOrder = masterLocations.length + 1;
+                await supabaseClient.from('locations').insert([{ name: newLoc, sort_order: nextOrder }]);
                 input.value = '';
                 await fetchLocations();
                 renderLocationsMenu();
