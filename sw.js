@@ -1,4 +1,4 @@
-const CACHE = 'wheresmyv2';
+const CACHE = 'wheresmyv3';
 const SHELL = [
   './',
   './index.html',
@@ -24,8 +24,19 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
-// Network first, fall back to cache (keeps Supabase data fresh when online)
+// Only the app shell is cached (same-origin GET). Supabase auth + data
+// calls (cross-origin / non-GET) always go straight to the network and are
+// never stored, so signed-out reloads can't serve cached private data.
 self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  const isShell = e.request.method === 'GET' && url.origin === self.location.origin;
+
+  if (!isShell) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
+
+  // Network-first for the shell, fall back to cache when offline.
   e.respondWith(
     fetch(e.request)
       .then(res => {

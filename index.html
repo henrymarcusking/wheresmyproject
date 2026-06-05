@@ -18,6 +18,31 @@
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans antialiased pb-24">
 
+    <!-- Login gate: covers the whole app until a session is established -->
+    <div id="login-overlay" class="fixed inset-0 z-50 bg-slate-50 flex items-center justify-center px-6">
+        <div class="w-full max-w-sm">
+            <div class="flex flex-col items-center mb-8">
+                <svg width="56" height="56" viewBox="0 0 512 512" class="shrink-0">
+                    <text x="256" y="356" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif" font-size="255" font-weight="900" fill="#fbbf24" text-anchor="middle">?</text>
+                    <path d="M 86,408 L 86,174 L 256,78 L 426,174 L 426,408 Z" fill="none" stroke="#4f46e5" stroke-width="18" stroke-linejoin="round" stroke-linecap="round"/>
+                </svg>
+                <h1 class="text-2xl font-bold tracking-tight text-slate-900 mt-3">WheresMy</h1>
+                <p class="text-sm text-slate-400 mt-1">Sign in to your household</p>
+            </div>
+            <form id="login-form" class="space-y-3">
+                <input type="email" id="login-email" placeholder="Email" autocomplete="username" required
+                    class="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all">
+                <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required
+                    class="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all">
+                <p id="login-error" class="hidden text-sm text-red-600 px-1"></p>
+                <button type="submit" id="login-submit-btn"
+                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
+                    Sign in
+                </button>
+            </form>
+        </div>
+    </div>
+
     <header class="bg-indigo-600 text-white sticky top-0 shadow-md z-10">
         <div class="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
             <h1 class="text-xl font-bold tracking-tight flex items-center gap-2">
@@ -181,6 +206,13 @@
 
             <div id="locations-list" class="space-y-2 overflow-y-auto flex-1 pb-4">
                 </div>
+
+            <div class="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
+                <span id="signed-in-as" class="text-xs text-slate-400 truncate"></span>
+                <button id="sign-out-btn" class="flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-red-600 transition-colors shrink-0">
+                    <i data-lucide="log-out" class="w-4 h-4"></i> Sign out
+                </button>
+            </div>
         </div>
     </div>
 
@@ -1428,10 +1460,67 @@
 
         // ── END VOICE ADD ────────────────────────────────────────────────────
 
-        document.addEventListener('DOMContentLoaded', async () => {
-            lucide.createIcons();
+        // --- AUTH ---
+        const loginOverlay = document.getElementById('login-overlay');
+        const loginForm = document.getElementById('login-form');
+        const loginError = document.getElementById('login-error');
+        const loginSubmitBtn = document.getElementById('login-submit-btn');
+        let appLoaded = false;
+
+        async function loadApp(session) {
+            loginOverlay.classList.add('hidden');
+            const asEl = document.getElementById('signed-in-as');
+            if (asEl) asEl.textContent = session?.user?.email || '';
+            if (appLoaded) return;          // don't re-fetch on token refresh
+            appLoaded = true;
             await Promise.all([fetchLocations(), fetchOwners()]);
             await fetchItems();
+        }
+
+        function showLogin() {
+            appLoaded = false;
+            loginOverlay.classList.remove('hidden');
+        }
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            loginError.classList.add('hidden');
+            loginSubmitBtn.disabled = true;
+            loginSubmitBtn.textContent = 'Signing in…';
+            const email = document.getElementById('login-email').value.trim();
+            const password = document.getElementById('login-password').value;
+            const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+            if (error) {
+                loginError.textContent = error.message || 'Could not sign in. Check your email and password.';
+                loginError.classList.remove('hidden');
+            } else {
+                document.getElementById('login-password').value = '';
+            }
+            loginSubmitBtn.disabled = false;
+            loginSubmitBtn.textContent = 'Sign in';
+        });
+
+        document.getElementById('sign-out-btn').addEventListener('click', async () => {
+            await supabaseClient.auth.signOut();
+        });
+
+        // React to login / logout / token refresh
+        supabaseClient.auth.onAuthStateChange((event, session) => {
+            if (session) {
+                loadApp(session);
+            } else {
+                showLogin();
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            lucide.createIcons();
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) {
+                await loadApp(session);
+            } else {
+                showLogin();
+            }
         });
 
         if ('serviceWorker' in navigator) {
