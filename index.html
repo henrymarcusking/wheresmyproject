@@ -114,6 +114,8 @@
 
     <!-- Hidden file input for OCR photo capture -->
     <input type="file" id="ocr-file-input" accept="image/*" capture="environment" class="hidden">
+    <!-- Hidden file input for AI vision (Gemini) photo capture -->
+    <input type="file" id="vision-file-input" accept="image/*" capture="environment" class="hidden">
 
     <div id="item-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-30">
         <div class="fixed bottom-0 inset-x-0 bg-white rounded-t-2xl p-6 max-w-md mx-auto shadow-xl">
@@ -141,9 +143,14 @@
                 <div>
                     <div class="flex justify-between items-center mb-1">
                         <label class="block text-sm font-semibold text-slate-700">Item Name</label>
-                        <button type="button" id="ocr-trigger-btn" class="flex items-center gap-1 text-xs text-violet-500 hover:text-violet-700 font-semibold transition-colors">
-                            <i data-lucide="camera" class="w-3.5 h-3.5"></i> Scan text
-                        </button>
+                        <div class="flex items-center gap-3">
+                            <button type="button" id="vision-trigger-btn" class="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-semibold transition-colors">
+                                <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Identify item
+                            </button>
+                            <button type="button" id="ocr-trigger-btn" class="flex items-center gap-1 text-xs text-violet-500 hover:text-violet-700 font-semibold transition-colors">
+                                <i data-lucide="camera" class="w-3.5 h-3.5"></i> Scan text
+                            </button>
+                        </div>
                     </div>
                     <input type="text" id="form-name" required class="w-full border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
                 </div>
@@ -1236,20 +1243,63 @@
             }
         }
 
+        // ── AI VISION (Gemini, via secure Supabase Edge Function) ────────────
+        // Recognises the object in a photo (not just printed text) and fills the
+        // item name. The Gemini key lives server-side in the Edge Function; the
+        // browser only sends the image with the logged-in user's auth token.
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result).split(',')[1]); // strip "data:...;base64," prefix
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function processVisionImage(file) {
+            setOCRBanner('processing', 'Identifying item with AI…');
+            try {
+                const base64 = await fileToBase64(file);
+                const { data, error } = await supabaseClient.functions.invoke('identify-item', {
+                    body: { image: base64, mimeType: file.type || 'image/jpeg' }
+                });
+                if (error) throw error;
+                if (!data || !data.name) {
+                    setOCRBanner('error', "Couldn't identify the item — try another photo");
+                    return;
+                }
+                document.getElementById('form-name').value = data.name;
+                setOCRBanner('success', `Identified: "${data.name}"`);
+            } catch (err) {
+                console.error('Vision error:', err);
+                setOCRBanner('error', "Couldn't identify item — check your connection and try again");
+            }
+        }
+
         const ocrFileInput = document.getElementById('ocr-file-input');
+        const visionFileInput = document.getElementById('vision-file-input');
+        let lastCaptureInput = visionFileInput; // which input the Retake button reopens
 
-        // Trigger file picker from the in-modal "Scan text" button (direct gesture → no browser block)
+        // "Scan text" → local OCR (Tesseract, offline, reads printed text)
         document.getElementById('ocr-trigger-btn').addEventListener('click', () => {
+            lastCaptureInput = ocrFileInput;
             ocrFileInput.click();
         });
 
-        // Retake button reopens the camera
+        // "Identify item" → Gemini vision (recognises the object itself)
+        document.getElementById('vision-trigger-btn').addEventListener('click', () => {
+            lastCaptureInput = visionFileInput;
+            visionFileInput.click();
+        });
+
+        // Retake button reopens whichever camera mode was last used
         document.getElementById('ocr-retake-btn').addEventListener('click', () => {
-            ocrFileInput.value = '';
-            ocrFileInput.click();
+            lastCaptureInput.value = '';
+            lastCaptureInput.click();
         });
 
-        // Bottom bar camera button — open modal, then user taps "Scan text" inside
+        // Bottom bar camera button — open modal, then user taps a scan option inside
         document.getElementById('photo-add-btn').addEventListener('click', () => {
             openItemModal();
         });
@@ -1261,7 +1311,14 @@
             ocrFileInput.value = ''; // reset so same file can be reselected
         });
 
-        // ── END OCR ──────────────────────────────────────────────────────────
+        visionFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            await processVisionImage(file);
+            visionFileInput.value = '';
+        });
+
+        // ── END OCR / VISION ─────────────────────────────────────────────────
 
         // ── VOICE ADD ────────────────────────────────────────────────────────
 
