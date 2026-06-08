@@ -58,6 +58,9 @@
                 <button id="open-locations-btn" class="text-white hover:text-indigo-200 p-2.5 bg-indigo-700 rounded-xl transition-colors" title="Manage Locations">
                     <i data-lucide="map-pin" class="w-5 h-5"></i>
                 </button>
+                <button id="open-packing-btn" class="text-white hover:text-indigo-200 p-2.5 bg-indigo-700 rounded-xl transition-colors" title="Packing Lists">
+                    <i data-lucide="briefcase" class="w-5 h-5"></i>
+                </button>
                 <div id="sync-indicator" class="text-xs bg-indigo-700 px-2.5 py-1 rounded-full flex items-center gap-1">
                     <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Connected
                 </div>
@@ -270,6 +273,55 @@
         </div>
     </div>
 
+    <!-- Packing Lists modal -->
+    <div id="packing-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-30">
+        <div class="fixed bottom-0 inset-x-0 bg-white rounded-t-2xl p-6 max-w-md mx-auto shadow-xl max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-slate-900">Packing Lists</h2>
+                <button id="close-packing-btn" class="text-slate-400 hover:text-slate-600 p-1"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+
+            <!-- New list button + inline form -->
+            <button id="new-list-btn" class="mb-3 w-full bg-indigo-600 text-white py-2.5 rounded-lg font-semibold hover:bg-indigo-700 flex items-center justify-center gap-1.5">
+                <i data-lucide="plus" class="w-4 h-4"></i> New list
+            </button>
+            <div id="new-list-form" class="hidden mb-3 space-y-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <input type="text" id="new-list-name" placeholder="List name (e.g., Ski Trip)" class="w-full border border-slate-200 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                <select id="new-list-owner" class="w-full border border-slate-200 bg-white rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select>
+                <div class="flex gap-2">
+                    <button id="new-list-cancel" type="button" class="flex-1 py-2 rounded-lg border border-slate-200 text-slate-500 font-semibold hover:bg-slate-100">Cancel</button>
+                    <button id="new-list-create" type="button" class="flex-1 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700">Create</button>
+                </div>
+            </div>
+
+            <div id="packing-lists-list" class="space-y-2 overflow-y-auto flex-1 pb-4"></div>
+            <p id="packing-empty" class="hidden text-center text-slate-400 text-sm py-8">No packing lists yet — tap “New list” to start one.</p>
+        </div>
+    </div>
+
+    <!-- Packing list detail (add items, tick packed) -->
+    <div id="packing-detail-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-40">
+        <div class="fixed bottom-0 inset-x-0 bg-white rounded-t-2xl p-6 max-w-md mx-auto shadow-xl max-h-[85vh] flex flex-col">
+            <div class="flex justify-between items-center mb-1">
+                <h2 id="packing-detail-title" class="text-lg font-bold text-slate-900 truncate">List</h2>
+                <button id="close-packing-detail-btn" class="text-slate-400 hover:text-slate-600 p-1 shrink-0"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+            <p id="packing-detail-sub" class="text-xs text-slate-400 mb-3"></p>
+
+            <div class="flex gap-2 mb-3">
+                <button id="pack-all-btn" type="button" class="flex-1 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Pack all</button>
+                <button id="unpack-all-btn" type="button" class="flex-1 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 font-semibold text-sm hover:bg-slate-50">Unpack all</button>
+            </div>
+
+            <div class="relative mb-3">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400"><i data-lucide="search" class="w-4 h-4"></i></span>
+                <input type="text" id="packing-item-search" placeholder="Search items to add…" class="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+            </div>
+
+            <div id="packing-detail-items" class="space-y-2 overflow-y-auto flex-1 pb-4"></div>
+        </div>
+    </div>
+
     <script>
         // --- 🔑 CONFIGURATION ---
         const SUPABASE_URL = "https://quclamokiadmbockaqnn.supabase.co";
@@ -282,7 +334,10 @@
         let masterLocations = [];
         let masterOwners = [];
         let currentHouseholdId = null; // cached for keying photo uploads by household
-        const activeFilters = { owners: new Set(), locations: new Set(), lostOnly: false, loanedOnly: false };
+        let packingLists = [];         // [{id, name, owner, sort_order}]
+        let packingListItems = [];     // [{id, list_id, item_id, packed}]
+        let packedItemIds = new Set(); // item ids packed in any list (drives the card badge)
+        const activeFilters = { owners: new Set(), locations: new Set(), lostOnly: false, loanedOnly: false, packedOnly: false };
 
         const colorPalettes = [
             { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
@@ -954,7 +1009,8 @@
                 const matchesLocation = activeFilters.locations.size === 0 || activeFilters.locations.has(item.location);
                 const matchesLost     = !activeFilters.lostOnly   || item.lost === true;
                 const matchesLoaned   = !activeFilters.loanedOnly || !!item.loaned_to;
-                return matchesSearch && matchesOwner && matchesLocation && matchesLost && matchesLoaned;
+                const matchesPacked   = !activeFilters.packedOnly || packedItemIds.has(item.id);
+                return matchesSearch && matchesOwner && matchesLocation && matchesLost && matchesLoaned && matchesPacked;
             });
 
             if (filteredItems.length === 0) {
@@ -988,13 +1044,16 @@
                        </span>`
                     : '';
 
-                const locationBadge = item.lost
+                const isPacked = packedItemIds.has(item.id);
+                const locationBadge = isPacked
+                    ? `<span onclick="openItemModal(${item.id})" class="px-3 py-1.5 rounded-lg text-xs font-bold border bg-amber-50 text-amber-700 border-amber-200 cursor-pointer select-none active:scale-95 transition-transform" title="Packed">🧳 Packed</span>`
+                    : item.lost
                     ? `<span onclick="openItemModal(${item.id})" class="px-3 py-1.5 rounded-lg text-xs font-bold border bg-red-500 text-white border-red-500 cursor-pointer select-none active:scale-95 transition-transform">LOST!</span>`
                     : item.loaned_to
                     ? `<span onclick="openItemModal(${item.id})" class="px-3 py-1.5 rounded-lg text-xs font-bold border bg-teal-50 text-teal-700 border-teal-200 cursor-pointer select-none active:scale-95 transition-transform" title="On loan — tap for details">↗ ${item.loaned_to}</span>`
                     : `<span onclick="cycleLocation(${item.id}, '${item.location}', event)" class="px-3 py-1.5 rounded-lg text-xs font-bold border ${palette.bg} ${palette.text} ${palette.border} transition-transform active:scale-95 cursor-pointer select-none" title="Tap to cycle location">${item.location}</span>`;
 
-                const sublocationLine = (item.lost || item.loaned_to)
+                const sublocationLine = (isPacked || item.lost || item.loaned_to)
                     ? ''
                     : `<p class="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><i data-lucide="layers" class="w-3 h-3"></i> ${item.sublocation}</p>`;
 
@@ -1107,10 +1166,23 @@
                 renderFilterSheet(); updateFilterUI(); renderItems(searchBar.value);
             });
             statusPillsEl.appendChild(loanPill);
+
+            const packedPill = document.createElement('button');
+            packedPill.textContent = '🧳 Packed';
+            packedPill.className = `px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                activeFilters.packedOnly
+                    ? 'bg-amber-500 text-white border-amber-500'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-amber-400'
+            }`;
+            packedPill.addEventListener('click', () => {
+                activeFilters.packedOnly = !activeFilters.packedOnly;
+                renderFilterSheet(); updateFilterUI(); renderItems(searchBar.value);
+            });
+            statusPillsEl.appendChild(packedPill);
         }
 
         function updateFilterUI() {
-            const totalActive = activeFilters.owners.size + activeFilters.locations.size + (activeFilters.lostOnly ? 1 : 0) + (activeFilters.loanedOnly ? 1 : 0);
+            const totalActive = activeFilters.owners.size + activeFilters.locations.size + (activeFilters.lostOnly ? 1 : 0) + (activeFilters.loanedOnly ? 1 : 0) + (activeFilters.packedOnly ? 1 : 0);
             const filterLabel = document.getElementById('filter-label');
             const openBtn = document.getElementById('open-filter-btn');
             const chipsEl = document.getElementById('active-filter-chips');
@@ -1137,6 +1209,12 @@
                 if (activeFilters.loanedOnly) {
                     chipsEl.appendChild(makeChip('↗ On loan', () => {
                         activeFilters.loanedOnly = false;
+                        updateFilterUI(); renderFilterSheet(); renderItems(searchBar.value);
+                    }));
+                }
+                if (activeFilters.packedOnly) {
+                    chipsEl.appendChild(makeChip('🧳 Packed', () => {
+                        activeFilters.packedOnly = false;
                         updateFilterUI(); renderFilterSheet(); renderItems(searchBar.value);
                     }));
                 }
@@ -1179,6 +1257,7 @@
             activeFilters.locations.clear();
             activeFilters.lostOnly = false;
             activeFilters.loanedOnly = false;
+            activeFilters.packedOnly = false;
             renderFilterSheet();
             updateFilterUI();
             renderItems(searchBar.value);
@@ -1384,6 +1463,252 @@
         });
 
         // ── END AI VISION ────────────────────────────────────────────────────
+
+        // ── PACKING LISTS ────────────────────────────────────────────────────
+        // Lists of items to pack for a trip. "Packed" is a non-destructive
+        // overlay (a flag in packing_list_items) — it never changes an item's
+        // stored location, so unpacking just clears the flag.
+
+        const packingModal = document.getElementById('packing-modal');
+        const packingDetailModal = document.getElementById('packing-detail-modal');
+        let activeListId = null; // list currently open in the detail view
+
+        async function fetchPackingLists() {
+            const [listsRes, membersRes] = await Promise.all([
+                supabaseClient.from('packing_lists').select('*').order('sort_order', { ascending: true }),
+                supabaseClient.from('packing_list_items').select('*')
+            ]);
+            if (!listsRes.error) packingLists = listsRes.data || [];
+            else console.error('Error fetching packing lists:', listsRes.error);
+            if (!membersRes.error) packingListItems = membersRes.data || [];
+            else console.error('Error fetching packing list items:', membersRes.error);
+            packedItemIds = new Set(packingListItems.filter(m => m.packed).map(m => m.item_id));
+        }
+
+        // Re-load packing data and refresh every view that's currently showing it.
+        async function refreshPackingAndItems() {
+            await fetchPackingLists();
+            renderItems(searchBar.value);
+            if (!packingModal.classList.contains('hidden')) renderPackingLists();
+            if (!packingDetailModal.classList.contains('hidden') && activeListId) renderPackingDetail();
+        }
+
+        document.getElementById('open-packing-btn').addEventListener('click', () => {
+            renderPackingLists();
+            packingModal.classList.remove('hidden');
+        });
+        document.getElementById('close-packing-btn').addEventListener('click', () => {
+            packingModal.classList.add('hidden');
+            hideNewListForm();
+        });
+
+        // New list form
+        function populateOwnerSelect() {
+            const sel = document.getElementById('new-list-owner');
+            sel.innerHTML = '<option value="">(no owner)</option>'
+                + masterOwners.map(o => `<option value="${o}">${o}</option>`).join('');
+        }
+        function showNewListForm() {
+            populateOwnerSelect();
+            document.getElementById('new-list-name').value = '';
+            document.getElementById('new-list-form').classList.remove('hidden');
+            document.getElementById('new-list-btn').classList.add('hidden');
+            document.getElementById('new-list-name').focus();
+        }
+        function hideNewListForm() {
+            document.getElementById('new-list-form').classList.add('hidden');
+            document.getElementById('new-list-btn').classList.remove('hidden');
+        }
+        document.getElementById('new-list-btn').addEventListener('click', showNewListForm);
+        document.getElementById('new-list-cancel').addEventListener('click', hideNewListForm);
+        document.getElementById('new-list-create').addEventListener('click', createList);
+        document.getElementById('new-list-name').addEventListener('keydown', e => { if (e.key === 'Enter') createList(); });
+
+        async function createList() {
+            const name = document.getElementById('new-list-name').value.trim();
+            if (!name) { document.getElementById('new-list-name').focus(); return; }
+            const owner = document.getElementById('new-list-owner').value || null;
+            const sort_order = packingLists.reduce((m, l) => Math.max(m, l.sort_order || 0), 0) + 1;
+            setSyncing(true);
+            const { error } = await supabaseClient.from('packing_lists').insert([{ name, owner, sort_order }]);
+            setSyncing(false);
+            if (error) { console.error(error); setSyncIndicatorError('Could not create list — try again.'); return; }
+            hideNewListForm();
+            await refreshPackingAndItems();
+        }
+
+        function renderPackingLists() {
+            const container = document.getElementById('packing-lists-list');
+            const empty = document.getElementById('packing-empty');
+            container.innerHTML = '';
+            if (packingLists.length === 0) { empty.classList.remove('hidden'); return; }
+            empty.classList.add('hidden');
+
+            packingLists.forEach((list, index) => {
+                const members = packingListItems.filter(m => m.list_id === list.id);
+                const packedCount = members.filter(m => m.packed).length;
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200';
+                row.draggable = true;
+                row.dataset.index = index;
+                row.innerHTML = `
+                    <i data-lucide="grip-vertical" class="w-4 h-4 text-slate-300 shrink-0 cursor-grab"></i>
+                    <button class="list-open flex-1 text-left min-w-0">
+                        <span class="font-semibold text-slate-800 block truncate">${list.name}</span>
+                        <span class="text-xs text-slate-400">${list.owner ? list.owner + ' · ' : ''}${packedCount}/${members.length} packed</span>
+                    </button>
+                    <button class="list-delete text-slate-400 hover:text-red-500 p-1" title="Delete list"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                `;
+                row.querySelector('.list-open').addEventListener('click', () => openPackingDetail(list.id));
+                row.querySelector('.list-delete').addEventListener('click', () => deleteList(list.id, list.name));
+                row.addEventListener('dragstart', () => { dragSrcIndex = index; });
+                row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('border-indigo-400'); });
+                row.addEventListener('dragleave', () => row.classList.remove('border-indigo-400'));
+                row.addEventListener('drop', async e => {
+                    e.preventDefault();
+                    row.classList.remove('border-indigo-400');
+                    const destIndex = parseInt(row.dataset.index);
+                    if (dragSrcIndex === null || dragSrcIndex === destIndex) return;
+                    const moved = packingLists.splice(dragSrcIndex, 1)[0];
+                    packingLists.splice(destIndex, 0, moved);
+                    dragSrcIndex = null;
+                    renderPackingLists();
+                    await saveListOrder();
+                });
+                container.appendChild(row);
+            });
+            lucide.createIcons();
+        }
+
+        async function saveListOrder() {
+            setSyncing(true);
+            const results = await Promise.all(packingLists.map((l, i) =>
+                supabaseClient.from('packing_lists').update({ sort_order: i + 1 }).eq('id', l.id).select()
+            ));
+            setSyncing(false);
+            if (results.some(r => r.error)) {
+                await fetchPackingLists(); renderPackingLists();
+                setSyncIndicatorError('Could not save list order — check your connection.');
+            } else {
+                packingLists.forEach((l, i) => l.sort_order = i + 1);
+            }
+        }
+
+        async function deleteList(id, name) {
+            if (!confirm(`Delete the packing list "${name}"? The items themselves stay; they're just unpacked.`)) return;
+            setSyncing(true);
+            const { error } = await supabaseClient.from('packing_lists').delete().eq('id', id);
+            setSyncing(false);
+            if (error) { console.error(error); setSyncIndicatorError('Could not delete list.'); return; }
+            await refreshPackingAndItems();
+        }
+
+        // Detail view: add/remove items and tick them packed
+        function openPackingDetail(listId) {
+            activeListId = listId;
+            document.getElementById('packing-item-search').value = '';
+            renderPackingDetail();
+            packingDetailModal.classList.remove('hidden');
+        }
+        document.getElementById('close-packing-detail-btn').addEventListener('click', () => {
+            packingDetailModal.classList.add('hidden');
+            activeListId = null;
+            renderPackingLists(); // refresh the counts on the lists view
+        });
+        document.getElementById('packing-item-search').addEventListener('input', renderPackingDetail);
+        document.getElementById('pack-all-btn').addEventListener('click', () => setAllPacked(true));
+        document.getElementById('unpack-all-btn').addEventListener('click', () => setAllPacked(false));
+
+        function renderPackingDetail() {
+            const list = packingLists.find(l => l.id === activeListId);
+            if (!list) return;
+            document.getElementById('packing-detail-title').textContent = list.name;
+            const members = packingListItems.filter(m => m.list_id === list.id);
+            const packedCount = members.filter(m => m.packed).length;
+            document.getElementById('packing-detail-sub').textContent =
+                `${list.owner ? list.owner + ' · ' : ''}${packedCount}/${members.length} packed`;
+
+            const memberByItem = new Map(members.map(m => [m.item_id, m]));
+            const q = document.getElementById('packing-item-search').value.trim().toLowerCase();
+            const matches = it => !q || (it.name || '').toLowerCase().includes(q) || (it.location || '').toLowerCase().includes(q);
+            // Items already in this list first, then everything else
+            const ordered = [
+                ...items.filter(it => memberByItem.has(it.id)),
+                ...items.filter(it => !memberByItem.has(it.id))
+            ].filter(matches);
+
+            const container = document.getElementById('packing-detail-items');
+            container.innerHTML = '';
+            if (ordered.length === 0) {
+                container.innerHTML = '<p class="text-center text-slate-400 text-sm py-6">No matching items.</p>';
+                return;
+            }
+
+            ordered.forEach(it => {
+                const member = memberByItem.get(it.id);
+                const inThisList = !!member;
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200';
+                row.innerHTML = `
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-slate-800 truncate">${it.name}</p>
+                        <p class="text-xs text-slate-400 truncate">${it.location}</p>
+                    </div>
+                    ${inThisList
+                        ? `<label class="flex items-center gap-1.5 text-xs font-semibold ${member.packed ? 'text-amber-600' : 'text-slate-500'} cursor-pointer select-none">
+                               <input type="checkbox" class="pack-check w-4 h-4 accent-amber-500" ${member.packed ? 'checked' : ''}> Packed
+                           </label>
+                           <button class="remove-member text-slate-400 hover:text-red-500 p-1" title="Remove from list"><i data-lucide="x" class="w-4 h-4"></i></button>`
+                        : `<button class="add-member text-xs font-semibold text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded-lg border border-indigo-200 hover:bg-indigo-50">+ Add</button>`
+                    }
+                `;
+                if (inThisList) {
+                    row.querySelector('.pack-check').addEventListener('change', e => togglePacked(member.id, e.target.checked));
+                    row.querySelector('.remove-member').addEventListener('click', () => removeMember(member.id));
+                } else {
+                    row.querySelector('.add-member').addEventListener('click', () => addMember(list.id, it.id));
+                }
+                container.appendChild(row);
+            });
+            lucide.createIcons();
+        }
+
+        async function addMember(listId, itemId) {
+            setSyncing(true);
+            const { error } = await supabaseClient.from('packing_list_items')
+                .insert([{ list_id: listId, item_id: itemId, packed: false }]);
+            setSyncing(false);
+            if (error) { console.error(error); setSyncIndicatorError('Could not add item.'); return; }
+            await refreshPackingAndItems();
+        }
+
+        async function removeMember(memberId) {
+            setSyncing(true);
+            const { error } = await supabaseClient.from('packing_list_items').delete().eq('id', memberId);
+            setSyncing(false);
+            if (error) { console.error(error); setSyncIndicatorError('Could not remove item.'); return; }
+            await refreshPackingAndItems();
+        }
+
+        async function togglePacked(memberId, packed) {
+            setSyncing(true);
+            const { error } = await supabaseClient.from('packing_list_items').update({ packed }).eq('id', memberId);
+            setSyncing(false);
+            if (error) { console.error(error); setSyncIndicatorError('Could not update item.'); return; }
+            await refreshPackingAndItems();
+        }
+
+        async function setAllPacked(packed) {
+            if (!activeListId) return;
+            setSyncing(true);
+            const { error } = await supabaseClient.from('packing_list_items')
+                .update({ packed }).eq('list_id', activeListId);
+            setSyncing(false);
+            if (error) { console.error(error); setSyncIndicatorError('Could not update the list.'); return; }
+            await refreshPackingAndItems();
+        }
+
+        // ── END PACKING LISTS ────────────────────────────────────────────────
 
         // ── VOICE ADD ────────────────────────────────────────────────────────
 
@@ -1596,7 +1921,7 @@
             if (appLoaded) return;          // don't re-fetch on token refresh
             appLoaded = true;
             getHouseholdId();               // warm the cache for photo uploads (non-blocking)
-            await Promise.all([fetchLocations(), fetchOwners()]);
+            await Promise.all([fetchLocations(), fetchOwners(), fetchPackingLists()]);
             await fetchItems();
         }
 
