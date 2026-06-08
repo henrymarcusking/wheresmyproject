@@ -839,6 +839,7 @@
 
             // Upload the captured photo (if any) and attach its storage path.
             // A photo failure must not block saving the item, so it's best-effort.
+            let oldImageToDelete = null;
             if (pendingPhoto) {
                 try {
                     const householdId = await getHouseholdId();
@@ -849,6 +850,10 @@
                             .upload(path, pendingPhoto, { contentType: 'image/jpeg', upsert: false });
                         if (upErr) throw upErr;
                         itemData.image_path = path;
+                        // Replacing an existing photo → remove the old file afterwards
+                        if (existingItem?.image_path && existingItem.image_path !== path) {
+                            oldImageToDelete = existingItem.image_path;
+                        }
                     }
                 } catch (err) {
                     console.error('Photo upload failed (saving item without photo):', err);
@@ -859,6 +864,10 @@
                 await supabaseClient.from('items').update(itemData).eq('id', id);
             } else {
                 await supabaseClient.from('items').insert([itemData]);
+            }
+
+            if (oldImageToDelete) {
+                await supabaseClient.storage.from('item-photos').remove([oldImageToDelete]);
             }
 
             itemForm.reset();
@@ -927,6 +936,7 @@
                     document.getElementById('form-name').value = item.name;
                     clearPendingPhoto();
                     loadItemPhoto(item.image_path); // shows the saved photo if there is one
+                    setVisionButtonLabel(item.image_path ? 'change' : 'add');
                     editingItemId = item.id;
                     renderItemPackingSection(item.id);
                     document.getElementById('form-owner').value = item.owner || '';
@@ -973,6 +983,7 @@
                 itemForm.reset();
                 clearPendingPhoto();
                 hidePhotoBlock();
+                setVisionButtonLabel('identify');
                 editingItemId = null;
                 renderItemPackingSection(null);
                 document.getElementById('form-item-id').value = '';
@@ -1410,6 +1421,20 @@
             document.getElementById('item-photo-thumb').removeAttribute('src');
         }
 
+        // The photo button does double duty: AI "Identify item" for new items,
+        // or "Add image" / "Change image" for an existing one.
+        function setVisionButtonLabel(mode) {
+            const btn = document.getElementById('vision-trigger-btn');
+            if (mode === 'identify') {
+                btn.innerHTML = '<i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Identify item';
+            } else if (mode === 'change') {
+                btn.innerHTML = '<i data-lucide="camera" class="w-3.5 h-3.5"></i> Change image';
+            } else {
+                btn.innerHTML = '<i data-lucide="camera" class="w-3.5 h-3.5"></i> Add image';
+            }
+            lucide.createIcons();
+        }
+
         // Fetch a short-lived link to a stored photo and show it in the modal.
         async function loadItemPhoto(imagePath) {
             hidePhotoBlock();
@@ -1472,7 +1497,13 @@
             pendingPhotoUrl = URL.createObjectURL(photo);
             showPhotoThumb(pendingPhotoUrl);
 
-            await processVisionImage(photo);
+            // Auto-identify (and fill the name) only for brand-new items. For an
+            // existing item this is just "add/change image" — don't touch the name.
+            if (editingItemId) {
+                setOCRBanner('success', 'New photo ready — tap Save to update');
+            } else {
+                await processVisionImage(photo);
+            }
             visionFileInput.value = '';
         });
 
