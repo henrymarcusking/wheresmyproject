@@ -115,6 +115,11 @@
     <!-- Hidden file input for AI vision (Gemini) photo capture -->
     <input type="file" id="vision-file-input" accept="image/*" capture="environment" class="hidden">
 
+    <!-- Full-screen photo viewer (tap anywhere to close) -->
+    <div id="photo-viewer" class="fixed inset-0 z-50 bg-black/80 hidden items-center justify-center p-4 cursor-zoom-out">
+        <img id="photo-viewer-img" alt="Item photo" class="max-w-full max-h-full rounded-lg shadow-2xl">
+    </div>
+
     <div id="item-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden z-30">
         <div class="fixed bottom-0 inset-x-0 bg-white rounded-t-2xl p-6 max-w-md mx-auto shadow-xl">
             <div class="flex justify-between items-center mb-5">
@@ -147,6 +152,12 @@
                     </div>
                     <input type="text" id="form-name" required class="w-full border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
                 </div>
+
+                <!-- Item photo — tap the thumbnail to view it full size -->
+                <div id="item-photo-block" class="hidden">
+                    <img id="item-photo-thumb" alt="Item photo" class="w-20 h-20 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition-opacity">
+                </div>
+
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">Location</label>
                     <select id="form-location" required class="w-full border border-slate-200 bg-white rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
@@ -270,6 +281,7 @@
         let items = [];
         let masterLocations = [];
         let masterOwners = [];
+        let currentHouseholdId = null; // cached for keying photo uploads by household
         const activeFilters = { owners: new Set(), locations: new Set(), lostOnly: false, loanedOnly: false };
 
         const colorPalettes = [
@@ -324,7 +336,11 @@
         });
 
         document.getElementById('open-modal-btn').addEventListener('click', () => openItemModal());
-        document.getElementById('close-modal-btn').addEventListener('click', () => itemModal.classList.add('hidden'));
+        document.getElementById('close-modal-btn').addEventListener('click', () => {
+            itemModal.classList.add('hidden');
+            clearPendingPhoto();
+            hidePhotoBlock();
+        });
         
         document.getElementById('open-locations-btn').addEventListener('click', () => openLocationsModal());
         document.getElementById('close-locations-btn').addEventListener('click', () => locationsModal.classList.add('hidden'));
@@ -756,6 +772,24 @@
                 loaned_to: loanedToVal || null  // null clears the loan when returning
             };
 
+            // Upload the captured photo (if any) and attach its storage path.
+            // A photo failure must not block saving the item, so it's best-effort.
+            if (pendingPhoto) {
+                try {
+                    const householdId = await getHouseholdId();
+                    if (householdId) {
+                        const path = `${householdId}/${crypto.randomUUID()}.jpg`;
+                        const { error: upErr } = await supabaseClient.storage
+                            .from('item-photos')
+                            .upload(path, pendingPhoto, { contentType: 'image/jpeg', upsert: false });
+                        if (upErr) throw upErr;
+                        itemData.image_path = path;
+                    }
+                } catch (err) {
+                    console.error('Photo upload failed (saving item without photo):', err);
+                }
+            }
+
             if (id) {
                 await supabaseClient.from('items').update(itemData).eq('id', id);
             } else {
@@ -763,6 +797,8 @@
             }
 
             itemForm.reset();
+            clearPendingPhoto();
+            hidePhotoBlock();
             itemModal.classList.add('hidden');
             recognition?.abort();
             setVoiceBanner('hidden');
@@ -790,10 +826,15 @@
         });
 
         window.deleteItem = async function(id, e) {
-            e.stopPropagation(); 
+            e.stopPropagation();
             if(confirm("Delete this item permanently from cloud?")) {
                 setSyncing(true);
+                const item = items.find(i => i.id == id);
                 await supabaseClient.from('items').delete().eq('id', id);
+                // Clean up its photo so storage doesn't accumulate orphans
+                if (item?.image_path) {
+                    await supabaseClient.storage.from('item-photos').remove([item.image_path]);
+                }
                 await fetchItems();
             }
         }
@@ -819,6 +860,8 @@
                     document.getElementById('modal-title').textContent = "Edit Item";
                     document.getElementById('form-item-id').value = item.id;
                     document.getElementById('form-name').value = item.name;
+                    clearPendingPhoto();
+                    loadItemPhoto(item.image_path); // shows the saved photo if there is one
                     document.getElementById('form-owner').value = item.owner || '';
                     updateOwnerDropdown(item.owner || '');
 
@@ -861,6 +904,8 @@
             } else {
                 document.getElementById('modal-title').textContent = "Add New Item";
                 itemForm.reset();
+                clearPendingPhoto();
+                hidePhotoBlock();
                 document.getElementById('form-item-id').value = '';
                 homeHint.textContent = '💡 The room you enter will be remembered for each location.';
                 lostBanner.classList.add('hidden');
@@ -1226,6 +1271,77 @@
             }
         }
 
+        // ── ITEM PHOTOS ──────────────────────────────────────────────────────
+        // The photo captured for "Identify item" is also saved as the item's
+        // picture (uploaded to Supabase Storage on save). Photos are shrunk in
+        // the browser first to keep storage tiny.
+
+        let pendingPhoto = null;     // compressed Blob awaiting upload on next save
+        let pendingPhotoUrl = null;  // object URL for the preview (revoked on clear)
+
+        // Resize to fit maxDim and re-encode as JPEG to keep file size small.
+        function compressImage(file, maxDim = 1000, quality = 0.7) {
+            return new Promise((resolve, reject) => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    URL.revokeObjectURL(url);
+                    let { width, height } = img;
+                    if (width >= height && width > maxDim) {
+                        height = Math.round(height * maxDim / width); width = maxDim;
+                    } else if (height > maxDim) {
+                        width = Math.round(width * maxDim / height); height = maxDim;
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width; canvas.height = height;
+                    canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                    canvas.toBlob(b => b ? resolve(b) : reject(new Error('compress failed')), 'image/jpeg', quality);
+                };
+                img.onerror = reject;
+                img.src = url;
+            });
+        }
+
+        function clearPendingPhoto() {
+            if (pendingPhotoUrl) { URL.revokeObjectURL(pendingPhotoUrl); pendingPhotoUrl = null; }
+            pendingPhoto = null;
+        }
+
+        function showPhotoThumb(url) {
+            document.getElementById('item-photo-thumb').src = url;
+            document.getElementById('item-photo-block').classList.remove('hidden');
+        }
+
+        function hidePhotoBlock() {
+            document.getElementById('item-photo-block').classList.add('hidden');
+            document.getElementById('item-photo-thumb').removeAttribute('src');
+        }
+
+        // Fetch a short-lived link to a stored photo and show it in the modal.
+        async function loadItemPhoto(imagePath) {
+            hidePhotoBlock();
+            if (!imagePath) return;
+            const { data, error } = await supabaseClient.storage
+                .from('item-photos').createSignedUrl(imagePath, 3600);
+            if (!error && data?.signedUrl) showPhotoThumb(data.signedUrl);
+        }
+
+        // Full-screen viewer
+        document.getElementById('item-photo-thumb').addEventListener('click', () => {
+            const src = document.getElementById('item-photo-thumb').getAttribute('src');
+            if (!src) return;
+            document.getElementById('photo-viewer-img').src = src;
+            const viewer = document.getElementById('photo-viewer');
+            viewer.classList.remove('hidden');
+            viewer.classList.add('flex');
+        });
+        document.getElementById('photo-viewer').addEventListener('click', () => {
+            const viewer = document.getElementById('photo-viewer');
+            viewer.classList.add('hidden');
+            viewer.classList.remove('flex');
+            document.getElementById('photo-viewer-img').removeAttribute('src');
+        });
+
         const visionFileInput = document.getElementById('vision-file-input');
 
         // In-modal "Identify item" button → open the camera / photo picker
@@ -1250,7 +1366,20 @@
         visionFileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
-            await processVisionImage(file);
+
+            // Shrink once; reuse for both identification and storage.
+            let photo = file;
+            try { photo = await compressImage(file); }
+            catch (err) { console.warn('Image compression failed, using original:', err); }
+
+            // Retain this photo so it's attached to the item when saved
+            // (kept even if identification fails — the picture is still useful).
+            clearPendingPhoto();
+            pendingPhoto = photo;
+            pendingPhotoUrl = URL.createObjectURL(photo);
+            showPhotoThumb(pendingPhotoUrl);
+
+            await processVisionImage(photo);
             visionFileInput.value = '';
         });
 
@@ -1466,12 +1595,26 @@
             if (asEl) asEl.textContent = session?.user?.email || '';
             if (appLoaded) return;          // don't re-fetch on token refresh
             appLoaded = true;
+            getHouseholdId();               // warm the cache for photo uploads (non-blocking)
             await Promise.all([fetchLocations(), fetchOwners()]);
             await fetchItems();
         }
 
+        // The current user's household id (used to key photo uploads). Cached;
+        // readable thanks to the "read own membership" RLS policy.
+        async function getHouseholdId() {
+            if (currentHouseholdId) return currentHouseholdId;
+            const { data } = await supabaseClient
+                .from('household_members')
+                .select('household_id')
+                .maybeSingle();
+            currentHouseholdId = data?.household_id || null;
+            return currentHouseholdId;
+        }
+
         function showLogin() {
             appLoaded = false;
+            currentHouseholdId = null;
             loginOverlay.classList.remove('hidden');
         }
 
