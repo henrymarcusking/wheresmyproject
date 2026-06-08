@@ -53,14 +53,13 @@ Deno.serve(async (req) => {
 
     const prompt =
       "You are naming the single main physical object in this photo so it can be logged " +
-      "in a household inventory. Reply with ONLY the item name: up to 6 words, as specific " +
-      "as the photo allows. Always include the object type (e.g. mug, book, bottle, charger), " +
-      "and add the most useful distinguishing details you can actually see — colour, material, " +
-      "and any clearly legible brand, title, or label text. If a book, product, or label shows " +
-      "readable text, use it (e.g. 'Charlotte's Web book'). Do not invent details you cannot see. " +
-      "No explanation, no quotes, no trailing punctuation. " +
-      "Examples: black leather wallet | Indiana ceramic coffee mug | " +
-      "Charlotte's Web paperback book | white Anker usb-c charger";
+      "in a household inventory. Reply with ONLY the item name: 3 to 4 words, short and " +
+      "recognisable. Include the object type (e.g. mug, book, bottle, charger) plus the one " +
+      "most useful identifier — usually its colour or, if clearly legible, its brand or title. " +
+      "Drop extra details like publisher, format, or material unless needed to tell it apart. " +
+      "Do not invent details you cannot see. No explanation, no quotes, no trailing punctuation. " +
+      "Examples: black leather wallet | Indiana coffee mug | " +
+      "Charlotte's Web book | white usb-c charger";
 
     // 3. Call Gemini.
     const geminiRes = await fetch(
