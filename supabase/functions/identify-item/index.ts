@@ -75,7 +75,15 @@ Deno.serve(async (req) => {
               { inline_data: { mime_type: mimeType || "image/jpeg", data: image } },
             ],
           }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 50 },
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 100,
+            // gemini-2.5-flash is a "thinking" model: by default it spends output
+            // tokens reasoning before answering, which starved the short answer
+            // (empty → 422, or truncated to one word). Disable thinking for a
+            // direct, short reply.
+            thinkingConfig: { thinkingBudget: 0 },
+          },
         }),
       },
     );
