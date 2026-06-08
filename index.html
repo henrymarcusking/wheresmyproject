@@ -112,8 +112,6 @@
         </div>
     </div>
 
-    <!-- Hidden file input for OCR photo capture -->
-    <input type="file" id="ocr-file-input" accept="image/*" capture="environment" class="hidden">
     <!-- Hidden file input for AI vision (Gemini) photo capture -->
     <input type="file" id="vision-file-input" accept="image/*" capture="environment" class="hidden">
 
@@ -143,14 +141,9 @@
                 <div>
                     <div class="flex justify-between items-center mb-1">
                         <label class="block text-sm font-semibold text-slate-700">Item Name</label>
-                        <div class="flex items-center gap-3">
-                            <button type="button" id="vision-trigger-btn" class="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-semibold transition-colors">
-                                <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Identify item
-                            </button>
-                            <button type="button" id="ocr-trigger-btn" class="flex items-center gap-1 text-xs text-violet-500 hover:text-violet-700 font-semibold transition-colors">
-                                <i data-lucide="camera" class="w-3.5 h-3.5"></i> Scan text
-                            </button>
-                        </div>
+                        <button type="button" id="vision-trigger-btn" class="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-semibold transition-colors">
+                            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i> Identify item
+                        </button>
                     </div>
                     <input type="text" id="form-name" required class="w-full border border-slate-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
                 </div>
@@ -1164,23 +1157,8 @@
             renderItems('');
         });
 
-        // ── OCR (PHOTO TO TEXT) ──────────────────────────────────────────────
-
-        let tesseractReady = false;
-
-        async function ensureTesseract() {
-            if (tesseractReady) return;
-            if (typeof Tesseract !== 'undefined') { tesseractReady = true; return; }
-            setOCRBanner('processing', 'Loading OCR engine… (one-time download)');
-            await new Promise((resolve, reject) => {
-                const s = document.createElement('script');
-                s.src = 'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js';
-                s.onload = resolve;
-                s.onerror = reject;
-                document.head.appendChild(s);
-            });
-            tesseractReady = true;
-        }
+        // ── PHOTO CAPTURE STATUS BANNER ──────────────────────────────────────
+        // Shared status banner for the AI "Identify item" photo flow below.
 
         function setOCRBanner(state, message) {
             const banner    = document.getElementById('ocr-banner');
@@ -1199,7 +1177,7 @@
             if (state === 'processing') {
                 icon.textContent = '📷';
                 icon.classList.add('animate-pulse');
-                text.textContent = message || 'Reading text from photo…';
+                text.textContent = message || 'Processing photo…';
                 retakeBtn.classList.add('hidden');
             } else if (state === 'success') {
                 icon.textContent = '✓';
@@ -1209,37 +1187,8 @@
             } else if (state === 'error') {
                 icon.textContent = '⚠️';
                 icon.classList.remove('animate-pulse');
-                text.textContent = message || 'Couldn\'t read text — try a clearer photo in good light';
+                text.textContent = message || 'Couldn\'t process photo — try again';
                 retakeBtn.classList.remove('hidden');
-            }
-        }
-
-        async function processOCRImage(file) {
-            setOCRBanner('processing');
-            try {
-                await ensureTesseract();
-                setOCRBanner('processing', 'Reading text from photo…');
-
-                const { data: { lines } } = await Tesseract.recognize(file, 'eng');
-
-                // Keep lines with decent confidence and meaningful length
-                const goodLines = lines
-                    .filter(l => l.confidence > 45 && l.text.trim().length > 2)
-                    .map(l => l.text.trim().replace(/\s+/g, ' '));
-
-                if (goodLines.length === 0) {
-                    setOCRBanner('error', 'No text found — try a clearer photo in good light');
-                    return;
-                }
-
-                // First clean line is most likely the title
-                const title = goodLines[0];
-                document.getElementById('form-name').value = title;
-                setOCRBanner('success', `Read: "${title}"`);
-
-            } catch (err) {
-                console.error('OCR error:', err);
-                setOCRBanner('error', 'Couldn\'t process photo — try again');
             }
         }
 
@@ -1277,38 +1226,25 @@
             }
         }
 
-        const ocrFileInput = document.getElementById('ocr-file-input');
         const visionFileInput = document.getElementById('vision-file-input');
-        let lastCaptureInput = visionFileInput; // which input the Retake button reopens
 
-        // "Scan text" → local OCR (Tesseract, offline, reads printed text)
-        document.getElementById('ocr-trigger-btn').addEventListener('click', () => {
-            lastCaptureInput = ocrFileInput;
-            ocrFileInput.click();
-        });
-
-        // "Identify item" → Gemini vision (recognises the object itself)
+        // In-modal "Identify item" button → open the camera / photo picker
         document.getElementById('vision-trigger-btn').addEventListener('click', () => {
-            lastCaptureInput = visionFileInput;
             visionFileInput.click();
         });
 
-        // Retake button reopens whichever camera mode was last used
+        // Retake button reopens the camera
         document.getElementById('ocr-retake-btn').addEventListener('click', () => {
-            lastCaptureInput.value = '';
-            lastCaptureInput.click();
+            visionFileInput.value = '';
+            visionFileInput.click();
         });
 
-        // Bottom bar camera button — open modal, then user taps a scan option inside
+        // Bottom bar camera button — go straight into AI "Identify item" capture.
+        // Open a fresh Add Item modal (so the recognised name + banner land there),
+        // then immediately trigger the camera within the same user gesture.
         document.getElementById('photo-add-btn').addEventListener('click', () => {
             openItemModal();
-        });
-
-        ocrFileInput.addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            await processOCRImage(file);
-            ocrFileInput.value = ''; // reset so same file can be reselected
+            visionFileInput.click();
         });
 
         visionFileInput.addEventListener('change', async (e) => {
@@ -1318,7 +1254,7 @@
             visionFileInput.value = '';
         });
 
-        // ── END OCR / VISION ─────────────────────────────────────────────────
+        // ── END AI VISION ────────────────────────────────────────────────────
 
         // ── VOICE ADD ────────────────────────────────────────────────────────
 
