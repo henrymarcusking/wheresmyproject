@@ -177,6 +177,16 @@
                         <option value="">— No owner —</option>
                     </select>
                 </div>
+
+                <!-- Packing lists this item is on (edit mode only) -->
+                <div id="item-packing-section" class="hidden">
+                    <label class="block text-sm font-semibold text-slate-700 mb-1">Packing lists</label>
+                    <div id="item-packing-chips" class="flex flex-wrap gap-2 mb-2"></div>
+                    <select id="item-packing-add" class="w-full border border-slate-200 bg-white rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="">+ Add to a packing list…</option>
+                    </select>
+                </div>
+
                 <p id="home-hint" class="text-xs text-slate-400 px-1"></p>
                 <!-- Shown when item is already lost -->
                 <div id="lost-banner" class="hidden flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
@@ -917,6 +927,8 @@
                     document.getElementById('form-name').value = item.name;
                     clearPendingPhoto();
                     loadItemPhoto(item.image_path); // shows the saved photo if there is one
+                    editingItemId = item.id;
+                    renderItemPackingSection(item.id);
                     document.getElementById('form-owner').value = item.owner || '';
                     updateOwnerDropdown(item.owner || '');
 
@@ -961,6 +973,8 @@
                 itemForm.reset();
                 clearPendingPhoto();
                 hidePhotoBlock();
+                editingItemId = null;
+                renderItemPackingSection(null);
                 document.getElementById('form-item-id').value = '';
                 homeHint.textContent = '💡 The room you enter will be remembered for each location.';
                 lostBanner.classList.add('hidden');
@@ -1471,7 +1485,51 @@
 
         const packingModal = document.getElementById('packing-modal');
         const packingDetailModal = document.getElementById('packing-detail-modal');
-        let activeListId = null; // list currently open in the detail view
+        let activeListId = null;   // list currently open in the detail view
+        let editingItemId = null;  // item open in the Edit Item modal (for its packing-list picker)
+
+        // Packing-list picker shown inside the Edit Item modal (existing items only)
+        function renderItemPackingSection(itemId) {
+            const section = document.getElementById('item-packing-section');
+            if (!itemId) { section.classList.add('hidden'); return; }
+            section.classList.remove('hidden');
+
+            const memberships = packingListItems.filter(m => m.item_id == itemId);
+            const inListIds = new Set(memberships.map(m => m.list_id));
+
+            const chipsEl = document.getElementById('item-packing-chips');
+            chipsEl.innerHTML = '';
+            if (memberships.length === 0) {
+                chipsEl.innerHTML = '<span class="text-xs text-slate-400">Not on any list yet.</span>';
+            } else {
+                memberships.forEach(m => {
+                    const list = packingLists.find(l => l.id === m.list_id);
+                    if (!list) return;
+                    const chip = document.createElement('span');
+                    chip.className = `inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-full text-xs font-semibold border ${m.packed ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`;
+                    chip.innerHTML = `${m.packed ? '🧳 ' : ''}${list.name}<button type="button" class="ml-0.5 hover:text-red-600"><i data-lucide="x" class="w-3 h-3"></i></button>`;
+                    chip.querySelector('button').addEventListener('click', async () => {
+                        await removeMember(m.id);
+                        renderItemPackingSection(itemId);
+                    });
+                    chipsEl.appendChild(chip);
+                });
+            }
+
+            const sel = document.getElementById('item-packing-add');
+            const available = packingLists.filter(l => !inListIds.has(l.id));
+            sel.innerHTML = '<option value="">+ Add to a packing list…</option>'
+                + available.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
+            sel.disabled = available.length === 0;
+            lucide.createIcons();
+        }
+
+        document.getElementById('item-packing-add').addEventListener('change', async (e) => {
+            const listId = e.target.value;
+            if (!listId || !editingItemId) return;
+            await addMember(listId, editingItemId);
+            renderItemPackingSection(editingItemId);
+        });
 
         async function fetchPackingLists() {
             const [listsRes, membersRes] = await Promise.all([
@@ -1709,6 +1767,24 @@
         }
 
         // ── END PACKING LISTS ────────────────────────────────────────────────
+
+        // ── CLICK-OUTSIDE TO CLOSE ───────────────────────────────────────────
+        // Clicking the blurred backdrop (the modal element itself, not its panel)
+        // closes the modal via its existing X button, so any cleanup still runs.
+        // The login overlay is intentionally excluded.
+        [
+            ['item-modal',           'close-modal-btn'],
+            ['locations-modal',      'close-locations-btn'],
+            ['owners-modal',         'close-owners-btn'],
+            ['filter-modal',         'close-filter-btn'],
+            ['packing-modal',        'close-packing-btn'],
+            ['packing-detail-modal', 'close-packing-detail-btn'],
+        ].forEach(([modalId, closeBtnId]) => {
+            const modal = document.getElementById(modalId);
+            modal.addEventListener('click', e => {
+                if (e.target === modal) document.getElementById(closeBtnId).click();
+            });
+        });
 
         // ── VOICE ADD ────────────────────────────────────────────────────────
 
