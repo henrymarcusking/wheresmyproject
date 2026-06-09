@@ -318,9 +318,13 @@
             </div>
             <p id="packing-detail-sub" class="text-xs text-slate-400 mb-3"></p>
 
-            <div class="flex gap-2 mb-3">
+            <div class="flex gap-2 mb-2">
                 <button id="pack-all-btn" type="button" class="flex-1 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Pack all</button>
                 <button id="unpack-all-btn" type="button" class="flex-1 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 font-semibold text-sm hover:bg-slate-50">Unpack all</button>
+            </div>
+            <div class="flex gap-2 mb-3">
+                <button id="move-to-btn" type="button" class="shrink-0 px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold text-sm hover:bg-emerald-700">Move to</button>
+                <select id="packing-move-dest" class="flex-1 border border-slate-200 bg-white rounded-lg px-2 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"></select>
             </div>
 
             <div class="relative mb-3">
@@ -1701,9 +1705,45 @@
         function openPackingDetail(listId) {
             activeListId = listId;
             document.getElementById('packing-item-search').value = '';
+            document.getElementById('packing-move-dest').innerHTML =
+                masterLocations.map(l => `<option value="${l}">${l}</option>`).join('');
             renderPackingDetail();
             packingDetailModal.classList.remove('hidden');
         }
+
+        // "Move to": relocate the packed items to the chosen location (using each
+        // item's remembered sub-location, or blank), then unpack them. The list
+        // itself stays, ready to pack again for the return trip.
+        document.getElementById('move-to-btn').addEventListener('click', async () => {
+            if (!activeListId) return;
+            const dest = document.getElementById('packing-move-dest').value;
+            if (!dest) { alert('Add a location in the 📍 menu first.'); return; }
+            const packedMembers = packingListItems.filter(m => m.list_id === activeListId && m.packed);
+            if (packedMembers.length === 0) {
+                alert('Tick the items you’ve packed first, then press Move to.');
+                return;
+            }
+            if (!confirm(`Move ${packedMembers.length} packed item(s) to “${dest}” and unpack them?`)) return;
+
+            setSyncing(true);
+            const updates = packedMembers.map(m => {
+                const item = items.find(i => i.id == m.item_id);
+                const sub = (item && item.location_map && item.location_map[dest]) || 'Unspecified';
+                return supabaseClient.from('items').update({ location: dest, sublocation: sub }).eq('id', m.item_id);
+            });
+            const results = await Promise.all(updates);
+            // Unpack everything we just moved
+            const { error: unpackErr } = await supabaseClient.from('packing_list_items')
+                .update({ packed: false }).eq('list_id', activeListId).eq('packed', true);
+            setSyncing(false);
+
+            if (results.some(r => r.error) || unpackErr) {
+                console.error('Move failed:', (results.find(r => r.error) || {}).error || unpackErr);
+                setSyncIndicatorError('Could not move all items — try again.');
+            }
+            await fetchItems();
+            await refreshPackingAndItems();
+        });
         document.getElementById('close-packing-detail-btn').addEventListener('click', () => {
             packingDetailModal.classList.add('hidden');
             activeListId = null;
