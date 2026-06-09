@@ -1080,7 +1080,7 @@
 
                 const isPacked = packedItemIds.has(item.id);
                 const locationBadge = isPacked
-                    ? `<span onclick="openItemModal(${item.id})" class="px-3 py-1.5 rounded-lg text-xs font-bold border bg-amber-50 text-amber-700 border-amber-200 cursor-pointer select-none active:scale-95 transition-transform" title="Packed">🧳 Packed</span>`
+                    ? `<span onclick="unpackItem(${item.id}, event)" class="px-3 py-1.5 rounded-lg text-xs font-bold border bg-amber-50 text-amber-700 border-amber-200 cursor-pointer select-none active:scale-95 transition-transform" title="Packed — tap to unpack">🧳 Packed</span>`
                     : item.lost
                     ? `<span onclick="openItemModal(${item.id})" class="px-3 py-1.5 rounded-lg text-xs font-bold border bg-red-500 text-white border-red-500 cursor-pointer select-none active:scale-95 transition-transform">LOST!</span>`
                     : item.loaned_to
@@ -1829,6 +1829,17 @@
             const { error } = await supabaseClient.from('packing_list_items').update({ packed }).eq('id', memberId);
             setSyncing(false);
             if (error) { console.error(error); setSyncIndicatorError('Could not update item.'); return; }
+            await refreshPackingAndItems();
+        }
+
+        // Tap the 🧳 badge on an item card to unpack it everywhere it's packed.
+        window.unpackItem = async function(id, e) {
+            e.stopPropagation(); // don't also open the item modal
+            setSyncing(true);
+            const { error } = await supabaseClient.from('packing_list_items')
+                .update({ packed: false }).eq('item_id', id).eq('packed', true);
+            setSyncing(false);
+            if (error) { console.error(error); setSyncIndicatorError('Could not unpack — try again.'); return; }
             await refreshPackingAndItems();
         }
 
